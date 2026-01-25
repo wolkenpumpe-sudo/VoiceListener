@@ -42,12 +42,39 @@ class MainActivity : AppCompatActivity() {
             val key = apiKeyInput.text.toString().trim()
             if (key.isNotEmpty()) {
                 prefs.edit().putString("groq_api_key", key).apply()
-                Toast.makeText(this, "API Key saved!", Toast.LENGTH_SHORT).show()
-                checkOverlayPermission() // Retry permission check/start service
+                
+                // Start Overlay Service
+                val intent = Intent(this, com.example.voicelistener.services.OverlayService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
+                }
+                Toast.makeText(this, "Service gestartet!", Toast.LENGTH_SHORT).show()
+                refreshLogs()
             } else {
                 Toast.makeText(this, "Enter a valid key", Toast.LENGTH_SHORT).show()
             }
         }
+
+        val refreshBtn = findViewById<Button>(R.id.refreshLogs)
+        val logView = findViewById<TextView>(R.id.logTextView)
+        
+        refreshBtn.setOnClickListener {
+            refreshLogs()
+            // Copy to clipboard
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val clip = android.content.ClipData.newPlainText("App Logs", logView.text)
+            clipboard.setPrimaryClip(clip)
+            Toast.makeText(this, "Logs kopiert!", Toast.LENGTH_SHORT).show()
+        }
+        
+        refreshLogs()
+    }
+    
+    private fun refreshLogs() {
+        val logView = findViewById<TextView>(R.id.logTextView)
+        logView.text = com.example.voicelistener.utils.FileLogger.getLogContent(this)
     }
 
     private fun checkPermissions() {

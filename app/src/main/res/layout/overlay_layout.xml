@@ -5,14 +5,14 @@
 
     <ImageButton
         android:id="@+id/overlay_button"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:background="#FF6200EE" 
+        android:layout_width="64dp"
+        android:layout_height="64dp"
         android:src="@drawable/ic_mic"
-        android:contentDescription="Voice Input"
-        android:elevation="8dp"
-        android:scaleType="center"
+        android:background="@android:color/transparent"
+        android:backgroundTint="#FF6200EE"
+        android:scaleType="fitCenter"
+        android:elevation="10dp"
         android:padding="12dp"
-        android:backgroundTint="#FF6200EE"/>
+        android:contentDescription="Voice Record" />
 
 </FrameLayout>

@@ -39,4 +39,27 @@
         android:gravity="center"
         android:layout_marginTop="24dp"/>
 
+    <Button
+        android:id="@+id/refreshLogs"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Logs laden / Kopieren"
+        android:layout_marginTop="16dp"/>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="8dp"
+        android:background="#EEE"
+        android:padding="8dp">
+        <TextView
+            android:id="@+id/logTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="10sp"
+            android:text="Logs erscheinen hier..."/>
+    </ScrollView>
+
 </LinearLayout>
