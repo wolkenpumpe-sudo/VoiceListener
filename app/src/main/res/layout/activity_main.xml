@@ -29,7 +29,7 @@
         android:id="@+id/saveButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Save & Start"
+        android:text="Save &amp; Start"
         android:layout_marginTop="16dp"/>
 
     <TextView
