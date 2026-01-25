@@ -2,28 +2,28 @@
 
 Diese Anleitung erklärt dir Schritt für Schritt, wie du aus den erstellten Dateien eine funktionierende App für dein Android-Handy machst, ohne Programmierkenntnisse.
 
-## Schritt 1: GitHub Vorbereitung
-Wir nutzen GitHub als unseren "Bau-Roboter" (GitHub Actions), der den Code für uns in eine App (APK) verwandelt.
+## Schritt 1 & 2: Upload direkt über den Browser (ohne Zusatzprogramme)
 
-1.  **GitHub Account:** Falls du noch keinen hast, registriere dich kostenlos auf [github.com](https://github.com/).
-2.  **GitHub Desktop installieren:** Das ist ein einfaches Fenster-Programm für Windows, um Dateien zu GitHub zu senden.
-    *   Lade es hier herunter: [desktop.github.com](https://desktop.github.com/)
-    *   Installiere und starte es. Logge dich mit deinem GitHub-Account ein.
+Wenn du nichts installieren möchtest, kannst du die Dateien direkt auf der GitHub-Webseite hochladen.
 
-## Schritt 2: Code "hochladen" (Pushen)
+1.  **Repository erstellen:**
+    *   Gehe auf [github.com/new](https://github.com/new).
+    *   Name: `VoiceListener`.
+    *   **WICHTIG**: Wähle **Private** (Privat) aus.
+    *   Klicke auf **Create repository**.
 
-1.  Öffne **GitHub Desktop**.
-2.  Gehe oben links auf **File** -> **Add Local Repository...**
-3.  Klicke auf **Choose...** und navigiere zu diesem Ordner (kopiere den Pfad in die Adresszeile):  
-    `C:\Users\Heiko\.gemini\antigravity\scratch\VoiceListener`
-4.  Klicke **Add Repository**.
-5.  GitHub Desktop wird fragen: "This directory does not appear to be a Git repository. Would you like to create one here?" -> Klicke **Create a repository**.
-6.  Gib bei "Name" `VoiceListener` ein (falls nicht schon da).
-7.  WICHTIG: Klicke unten auf **Create Repository**.
-8.  Jetzt erscheint oben ein blauer Button **Publish repository**. Klicke darauf.
-9.  **Dier wichtigste Schritt:**
-    *   Setze den Haken bei **Keep this code private**. (Das sorgt dafür, dass NIEMAND außer dir den Code oder die App sehen kann).
-    *   Klicke auf **Publish Repository**.
+2.  **Dateien hochladen:**
+    *   Du siehst nun eine Seite mit viel Text/Code. Klicke auf den Link in der Zeile:
+        *"...or create a new repository on the command line or **uploading an existing file**"* 
+        (Klicke auf "uploading an existing file").
+    *   Öffne nun deinen Windows Datei-Explorer und gehe in den Ordner:
+        `C:\Users\Heiko\.gemini\antigravity\scratch\VoiceListener`
+    *   Markiere **ALLES** in diesem Ordner (Drücke `STRG + A`), auch die versteckten Ordner wie `.github` falls sichtbar (wenn nicht, nicht schlimm, aber wichtig: `.github` muss mit. Falls du `.github` nicht siehst im Explorer: Klicke im Explorer oben auf "Ansicht" -> Haken bei "Ausgeblendete Elemente").
+    *   Ziehe alle markierten Dateien und Ordner mit der Maus in das graue Feld im Browser ("Drag files here to add them to your repository").
+    *   Warte, bis alle Dateien geladen sind.
+    *   Scrolle nach unten und klicke auf den grünen Button **Commit changes**.
+
+*Hinweis: Wenn der Ordner `.github` nicht mit hochgeladen wird, funktioniert der automatische Builder nicht. Stelle sicher, dass du ihn im Explorer siehst und mit markierst.*
 
 ## Schritt 3: Die App bauen lassen
 
