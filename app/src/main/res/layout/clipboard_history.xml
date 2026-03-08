@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="300dp"
+    android:layout_height="wrap_content"
+    android:background="@drawable/menu_bg"
+    android:padding="16dp"
+    android:elevation="8dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Zwischenablage Verlauf"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="#000000"
+        android:gravity="center"
+        android:layout_marginBottom="8dp"/>
+
+    <CheckBox
+        android:id="@+id/cbKeepOpen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Fenster offen lassen"
+        android:textColor="#333333"
+        android:checked="false"
+        android:layout_marginBottom="8dp"/>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp">
+
+        <EditText
+            android:id="@+id/etClipboardSearch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Suchen..."
+            android:inputType="text"
+            android:maxLines="1"
+            android:padding="8dp"
+            android:paddingEnd="40dp"
+            android:background="@android:drawable/edit_text" />
+
+        <ImageButton
+            android:id="@+id/btnClearSearch"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_gravity="end|center_vertical"
+            android:layout_marginEnd="4dp"
+            android:background="@android:color/transparent"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:tint="#888888"
+            android:visibility="gone"
+            android:contentDescription="Suche löschen" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="8dp">
+
+        <Button
+            android:id="@+id/btnTabHistory"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Verlauf"
+            android:backgroundTint="#4CAF50"
+            android:textColor="#FFFFFF" />
+
+        <Button
+            android:id="@+id/btnTabFavorites"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Favoriten"
+            android:backgroundTint="#CCCCCC"
+            android:textColor="#333333"
+            android:layout_marginStart="4dp"/>
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="300dp"
+        android:layout_marginBottom="12dp">
+        
+        <LinearLayout
+            android:id="@+id/clipboardListContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <!-- Items added dynamically -->
+        </LinearLayout>
+    </ScrollView>
+
+    <Button
+        android:id="@+id/btnCloseClipboard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Schließen"
+        android:backgroundTint="#FF333333"
+        android:textColor="#CCCCCC"/>
+
+</LinearLayout>

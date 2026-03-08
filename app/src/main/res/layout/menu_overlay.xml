@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/menu_bg"
+    android:padding="8dp"
+    android:elevation="8dp">
+
+    <Button
+        android:id="@+id/btnSettings"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:text="Einstellungen"
+        android:textSize="12sp"
+        android:backgroundTint="#FF6200EE"
+        android:textColor="#FFFFFF"
+        android:drawableLeft="@android:drawable/ic_menu_preferences"
+        android:drawablePadding="8dp"
+        android:gravity="start|center_vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:minHeight="0dp"
+        android:layout_marginBottom="2dp"/>
+
+
+
+    <Button
+        android:id="@+id/btnTranslate"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:text="Übersetzen"
+        android:textSize="12sp"
+        android:backgroundTint="#FFBB86FC"
+        android:textColor="#000000"
+        android:drawableLeft="@android:drawable/ic_menu_sort_by_size"
+        android:drawablePadding="8dp"
+        android:gravity="start|center_vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:minHeight="0dp"
+        android:layout_marginBottom="2dp"/>
+
+    <Button
+        android:id="@+id/btnClipboard"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:text="Zwischenablage"
+        android:textSize="12sp"
+        android:backgroundTint="#03DAC5"
+        android:textColor="#000000"
+        android:drawableLeft="@android:drawable/ic_menu_save"
+        android:drawablePadding="8dp"
+        android:gravity="start|center_vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:minHeight="0dp"
+        android:layout_marginBottom="2dp"/>
+
+    <Button
+        android:id="@+id/btnMarketData"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:text="Marktdaten"
+        android:textSize="12sp"
+        android:backgroundTint="#FF4CAF50"
+        android:textColor="#FFFFFF"
+        android:drawableLeft="@android:drawable/ic_menu_sort_alphabetically"
+        android:drawablePadding="8dp"
+        android:gravity="start|center_vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:minHeight="0dp"
+        android:layout_marginBottom="2dp"/>
+
+    <Button
+        android:id="@+id/btnAskLlama"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:text="askLlama (Aus)"
+        android:textSize="12sp"
+        android:backgroundTint="#FF607D8B"
+        android:textColor="#FFFFFF"
+        android:drawableLeft="@android:drawable/ic_menu_help"
+        android:drawablePadding="8dp"
+        android:gravity="start|center_vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:minHeight="0dp"
+        android:layout_marginBottom="2dp"/>
+
+    <Button
+        android:id="@+id/btnSettingsAI"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:text="Settings AI (Aus)"
+        android:textSize="12sp"
+        android:backgroundTint="#FF795548"
+        android:textColor="#FFFFFF"
+        android:drawableLeft="@android:drawable/ic_menu_manage"
+        android:drawablePadding="8dp"
+        android:gravity="start|center_vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:minHeight="0dp"
+        android:layout_marginBottom="2dp"/>
+
+    <Button
+        android:id="@+id/btnVisibilityToggle"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:text="Sichtbarkeit: Auto"
+        android:textSize="12sp"
+        android:backgroundTint="#FF9800"
+        android:textColor="#FFFFFF"
+        android:drawableLeft="@android:drawable/ic_menu_view"
+        android:drawablePadding="8dp"
+        android:gravity="start|center_vertical"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:minHeight="0dp"/>
+        
+</LinearLayout>
