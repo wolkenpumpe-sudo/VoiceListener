@@ -250,8 +250,8 @@ Output:
         val title = if (isHidden) "Voice Listener (Versteckt)" else "Voice Listener Aktiv"
         val text = when {
             isHidden -> "Tippen zum Anzeigen des Buttons"
-            recordingTrigger == 0 -> "2x Tap=Aufnahme, Lang=Verstecken, 3x=Menü"
-            else -> "Lang=Aufnahme, 2x Tap=Verstecken, 3x=Menü"
+            recordingTrigger == 0 -> "2x=Aufnahme | Lang=Menü | 3x=Verstecken"
+            else -> "Lang=Aufnahme | 2x=Menü | 3x=Verstecken"
         }
         
         // Show ActionIntent (via Trampoline Activity to bypass background limits)
