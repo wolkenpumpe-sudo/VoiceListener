@@ -22,6 +22,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import com.example.voicelistener.R
+import com.example.voicelistener.GestureManager
 import com.example.voicelistener.SettingsBackup
 import com.example.voicelistener.network.ChatRequest
 import com.example.voicelistener.network.GroqClient
@@ -69,16 +70,71 @@ Do not switch languages.
 
 Output:
 """
+
+        val ALL_RADIAL_ITEMS = listOf(
+            RadialItemDef("translate_es", "ES", "Spanisch", "#E91E63"),
+            RadialItemDef("translate_en", "EN", "Englisch", "#2196F3"),
+            RadialItemDef("translate_de", "DE", "Deutsch", "#FF9800"),
+            RadialItemDef("translator", "\uD83D\uDD04", "Übersetzen", "#BB86FC"),
+            RadialItemDef("clipboard", "\uD83D\uDCCB", "Clipboard", "#03DAC5"),
+            RadialItemDef("market", "\uD83D\uDCC8", "Markt", "#4CAF50"),
+            RadialItemDef("ask_llama", "\uD83E\uDD99", "Llama", "#607D8B"),
+            RadialItemDef("settings_ai", "\uD83E\uDD16", "AI Set.", "#795548"),
+            RadialItemDef("fix_text", "\u270F", "Fix Text", "#00BCD4"),
+            RadialItemDef("timeout", "\u23F1", "Timeout", "#FF5722"),
+            RadialItemDef("settings", "\u2699", "Settings", "#6200EE"),
+        )
+    }
+
+    data class RadialItemDef(val id: String, val icon: String, val label: String, val defaultColor: String)
+
+    private val PRIMARY_MODEL get() = getSharedPreferences("app_prefs", MODE_PRIVATE)
+        .getString("llm_model", "llama-3.3-70b-versatile") ?: "llama-3.3-70b-versatile"
+    private val FALLBACK_MODEL get(): String {
+        val primary = PRIMARY_MODEL
+        return if (primary == "llama-3.1-8b-instant") "llama-3.3-70b-versatile" else "llama-3.1-8b-instant"
+    }
+
+    private fun stripThinkingBlock(text: String): String {
+        return text.replace(Regex("<think>[\\s\\S]*?</think>\\s*"), "").trim()
+    }
+
+    private fun stripThinkingFromResponse(response: com.example.voicelistener.network.ChatResponse): com.example.voicelistener.network.ChatResponse {
+        return response.copy(choices = response.choices.map { choice ->
+            choice.copy(message = choice.message.copy(content = stripThinkingBlock(choice.message.content)))
+        })
+    }
+
+    private suspend fun chatWithFallback(auth: String, messages: List<Message>, temperature: Double = 0.0): com.example.voicelistener.network.ChatResponse {
+        val primary = PRIMARY_MODEL
+        val raw = try {
+            val request = ChatRequest(model = primary, messages = messages, temperature = temperature)
+            GroqClient.api.chatCompletion(auth, request)
+        } catch (e: retrofit2.HttpException) {
+            if (e.code() == 429) {
+                val fallback = FALLBACK_MODEL
+                FileLogger.log(this, "LLM", "Rate limit (429) on $primary, falling back to $fallback")
+                withContext(Dispatchers.Main) { showTopMessage("Rate limit — Fallback: $fallback") }
+                val request = ChatRequest(model = fallback, messages = messages, temperature = temperature)
+                GroqClient.api.chatCompletion(auth, request)
+            } else throw e
+        }
+        return stripThinkingFromResponse(raw)
     }
 
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
+    private var dimView: View? = null
     private var params: WindowManager.LayoutParams? = null
     private var audioRecorder: AudioRecorder? = null
     private var overlayButton: ImageButton? = null
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private val CHANNEL_ID = "VoiceListenerSilentChannel"
     
+    // Gesture recognition
+    private val gestureManager by lazy { GestureManager(this) }
+    private var savedVolumeBeforeMute: Int = -1
+
     // Visibility Logic
     private var isRecording = false
     private var isProcessing = false
@@ -101,14 +157,15 @@ Output:
                     }
                     return
                 }
-                
+
                 if (hasFocus) {
                     val alwaysHidden = prefs.getBoolean("overlay_always_hidden", false)
                     if (alwaysHidden) {
                          overlayView?.visibility = View.GONE
+                         dimView?.visibility = View.GONE
                          return@onReceive
                     }
-                    
+
                     // Show overlay
                     if (overlayView?.visibility != View.VISIBLE) {
                         overlayView?.visibility = View.VISIBLE
@@ -152,6 +209,7 @@ Output:
         
         closeMarketDataWidget()
         
+        if (dimView != null) try { windowManager.removeView(dimView) } catch(e: Exception) {}
         if (overlayView != null) try { windowManager.removeView(overlayView) } catch(e: Exception) {}
         if (menuView != null) try { windowManager.removeView(menuView) } catch(e: Exception) {}
         if (clipboardView != null) try { windowManager.removeView(clipboardView) } catch(e: Exception) {}
@@ -235,6 +293,7 @@ Output:
                 setShowBadge(true)
             }
             manager.createNotificationChannel(channelActive)
+
         }
     }
 
@@ -294,6 +353,19 @@ Output:
 
     private var messageView: android.widget.TextView? = null
     private var undoToastView: View? = null
+
+    private fun makeBackDismissible(view: View, params: WindowManager.LayoutParams, onDismiss: () -> Unit) {
+        params.flags = (params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()) or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        view.isFocusableInTouchMode = true
+        view.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == android.view.KeyEvent.KEYCODE_BACK && event.action == android.view.KeyEvent.ACTION_UP) {
+                onDismiss()
+                true
+            } else false
+        }
+        view.post { view.requestFocus() }
+    }
 
     private fun showTopMessage(text: String) {
         serviceScope.launch(Dispatchers.Main) {
@@ -464,6 +536,24 @@ Output:
         val alpha = prefs.getFloat("overlay_alpha", 1.0f)
         overlayView?.alpha = alpha
 
+        // Fullscreen dim background for better button visibility
+        val dimLevel = prefs.getFloat("overlay_dim", 0.0f)
+        if (dimLevel > 0f) {
+            dimView = View(this).apply {
+                setBackgroundColor(Color.argb((dimLevel * 255).toInt(), 0, 0, 0))
+                visibility = View.GONE
+            }
+            val dimParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            )
+            windowManager.addView(dimView, dimParams)
+        }
+
         windowManager.addView(overlayView, params)
         FileLogger.log(this, "OverlayService", "Overlay view added")
     }
@@ -485,6 +575,7 @@ Output:
 
             private var isMoving = false
             private val CLICK_THRESHOLD = 30
+            private val touchPoints = mutableListOf<FloatArray>() // [x, y, timestamp] for gesture recognition
             
             private var lastTouchDownTime: Long = 0L
             private var clickCount = 0
@@ -493,6 +584,8 @@ Output:
             private var lastClickTime: Long = 0L // Keep for double tap logic if needed elsewhere
             private var longPressRunnable: Runnable? = null
             private var menuOpenOnDown: Boolean = false
+            private var recordingStopClickCount = 0
+            private var recordingStopRunnable: Runnable? = null
             
             // Mode Preference: 0 = Hold, 1 = Toggle
             private var interactionMode = 0
@@ -516,6 +609,8 @@ Output:
                             initialTouchY = event.rawY
                             lastAction = MotionEvent.ACTION_DOWN
                             isMoving = false
+                            touchPoints.clear()
+                            touchPoints.add(floatArrayOf(event.rawX, event.rawY, event.eventTime.toFloat()))
                             menuOpenOnDown = menuView != null
                             
                             // Setup Long Press
@@ -542,6 +637,8 @@ Output:
                         MotionEvent.ACTION_MOVE -> {
                             val dx = (event.rawX - initialTouchX).toInt()
                             val dy = (event.rawY - initialTouchY).toInt()
+
+                            touchPoints.add(floatArrayOf(event.rawX, event.rawY, event.eventTime.toFloat()))
 
                             if (kotlin.math.abs(dx) > CLICK_THRESHOLD || kotlin.math.abs(dy) > CLICK_THRESHOLD) {
                                 isMoving = true
@@ -589,15 +686,43 @@ Output:
                                         if (totalDx > 0) handleSwipeRight() else handleSwipeLeft()
                                     }
                                 } else {
-                                    // Normal drag - save new position
-                                    prefs.edit().putInt("overlay_x", params!!.x).putInt("overlay_y", params!!.y).apply()
+                                    // Not a swipe — try custom gesture recognition
+                                    val recognized = tryRecognizeGesture()
+                                    if (recognized) {
+                                        // Gesture matched — snap back to original position
+                                        params!!.x = initialX
+                                        params!!.y = initialY
+                                        windowManager.updateViewLayout(overlayView, params)
+                                    } else {
+                                        // Normal drag - save new position
+                                        prefs.edit().putInt("overlay_x", params!!.x).putInt("overlay_y", params!!.y).apply()
+                                    }
                                 }
                             } else {
                                 if (isRecording) {
-                                    // Recording is active -> Stop it
-                                    stopRecordingAndProcess(duration)
-                                    isRecording = false
-                                    resetUI()
+                                    // Recording active: single click = stop & process, quick double click = cancel
+                                    recordingStopClickCount++
+                                    recordingStopRunnable?.let { clickHandler.removeCallbacks(it) }
+                                    recordingStopRunnable = Runnable {
+                                        val count = recordingStopClickCount
+                                        recordingStopClickCount = 0
+                                        if (count >= 2) {
+                                            // Double click = cancel recording, don't send
+                                            FileLogger.log(this@OverlayService, "Recording", "Cancelled by double click")
+                                            audioRecorder?.cancelRecording()
+                                            isRecording = false
+                                            pendingTranslateLang = null
+                                            resetUI()
+                                            showTopMessage("Aufnahme abgebrochen")
+                                            checkHideOverlay()
+                                        } else {
+                                            // Single click = stop and process normally
+                                            stopRecordingAndProcess(duration)
+                                            isRecording = false
+                                            resetUI()
+                                        }
+                                    }
+                                    clickHandler.postDelayed(recordingStopRunnable!!, 300)
                                 } else if (duration < 500) {
                                     // CLICK / TAP Handling (Use Click Counter for Triple Click Support)
                                     clickCount++
@@ -681,87 +806,83 @@ Output:
             }
 
             private fun handleSwipeUp() {
-                // Minimal volume change to trigger Android system volume bar
-                val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                val currentVol = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-                val maxVol = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
-
-                // Raise by 1, then immediately set back to show UI without real change
-                if (currentVol < maxVol) {
-                    audioManager.adjustStreamVolume(
-                        android.media.AudioManager.STREAM_MUSIC,
-                        android.media.AudioManager.ADJUST_RAISE,
-                        android.media.AudioManager.FLAG_SHOW_UI
-                    )
-                    // Set back to original after a brief moment so UI appears
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, currentVol, 0)
-                    }, 50)
-                } else {
-                    // Already at max - lower by 1 then restore
-                    audioManager.adjustStreamVolume(
-                        android.media.AudioManager.STREAM_MUSIC,
-                        android.media.AudioManager.ADJUST_LOWER,
-                        android.media.AudioManager.FLAG_SHOW_UI
-                    )
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, currentVol, 0)
-                    }, 50)
-                }
+                val action = getSharedPreferences("app_prefs", MODE_PRIVATE)
+                    .getString("swipe_up_action", "show_volume") ?: "show_volume"
+                executeAction(action)
             }
 
             private fun handleSwipeDown() {
-                val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                val currentVol = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-
-                if (savedVolumeBeforeMute == -1) {
-                    // Not muted -> Mute now
-                    savedVolumeBeforeMute = if (currentVol > 0) currentVol else 1
-                    audioManager.setStreamVolume(
-                        android.media.AudioManager.STREAM_MUSIC, 0,
-                        android.media.AudioManager.FLAG_SHOW_UI
-                    )
-                    showTopMessage("Stummgeschaltet")
-                } else {
-                    // Already muted -> Restore previous volume
-                    audioManager.setStreamVolume(
-                        android.media.AudioManager.STREAM_MUSIC, savedVolumeBeforeMute,
-                        android.media.AudioManager.FLAG_SHOW_UI
-                    )
-                    val maxVol = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
-                    val pct = (savedVolumeBeforeMute.toFloat() / maxVol * 100).toInt()
-                    showTopMessage("Lautstärke: $pct%")
-                    savedVolumeBeforeMute = -1
-                }
+                val action = getSharedPreferences("app_prefs", MODE_PRIVATE)
+                    .getString("swipe_down_action", "toggle_mute") ?: "toggle_mute"
+                executeAction(action)
             }
 
             private fun handleSwipeRight() {
-                // Media Play/Pause toggle
-                val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-                val keyDown = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
-                val keyUp = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
-                audioManager.dispatchMediaKeyEvent(keyDown)
-                audioManager.dispatchMediaKeyEvent(keyUp)
-
-                if (audioManager.isMusicActive) {
-                    showTopMessage("Pause")
-                } else {
-                    showTopMessage("Play")
-                }
+                val action = getSharedPreferences("app_prefs", MODE_PRIVATE)
+                    .getString("swipe_right_action", "media_play_pause") ?: "media_play_pause"
+                executeAction(action)
             }
 
             private fun handleSwipeLeft() {
-                // Show notification/status bar
-                @Suppress("WrongConstant")
-                try {
-                    val statusBarService = getSystemService("statusbar")
-                    val statusBarManager = statusBarService.javaClass
-                    val expandMethod = statusBarManager.getMethod("expandNotificationsPanel")
-                    expandMethod.invoke(statusBarService)
-                } catch (e: Exception) {
-                    FileLogger.log(this@OverlayService, "Swipe", "Notification bar error: ${e.message}")
-                    showTopMessage("Benachrichtigungen nicht verfügbar")
+                val action = getSharedPreferences("app_prefs", MODE_PRIVATE)
+                    .getString("swipe_left_action", "show_notifications") ?: "show_notifications"
+                executeAction(action)
+            }
+
+            private fun tryRecognizeGesture(): Boolean {
+                if (touchPoints.size < 10) return false // Too few points for a meaningful gesture
+
+                // Filter: gesture must be drawn quickly (< 800ms total)
+                val startTime = touchPoints.first()[2].toLong()
+                val endTime = touchPoints.last()[2].toLong()
+                val gestureDuration = endTime - startTime
+                if (gestureDuration > 1200) {
+                    FileLogger.log(this@OverlayService, "Gesture", "Rejected: too slow (${gestureDuration}ms)")
+                    return false
                 }
+
+                // Filter: must have at least one direction change (not just a straight line)
+                // Calculate total path length and direct distance
+                var pathLength = 0f
+                for (i in 1 until touchPoints.size) {
+                    val dx = touchPoints[i][0] - touchPoints[i - 1][0]
+                    val dy = touchPoints[i][1] - touchPoints[i - 1][1]
+                    pathLength += kotlin.math.sqrt(dx * dx + dy * dy)
+                }
+                val directDx = touchPoints.last()[0] - touchPoints.first()[0]
+                val directDy = touchPoints.last()[1] - touchPoints.first()[1]
+                val directDist = kotlin.math.sqrt(directDx * directDx + directDy * directDy)
+
+                // Sinuosity ratio: path length / direct distance
+                // A straight line has ratio ~1.0, complex gestures have higher ratios
+                val sinuosity = if (directDist > 1f) pathLength / directDist else pathLength / 1f
+                if (sinuosity < 1.3f) {
+                    FileLogger.log(this@OverlayService, "Gesture", "Rejected: too straight (sinuosity=$sinuosity)")
+                    return false
+                }
+
+                // Build a Gesture from collected touch points
+                val gesturePoints = ArrayList<android.gesture.GesturePoint>(touchPoints.size)
+                for (pt in touchPoints) {
+                    gesturePoints.add(android.gesture.GesturePoint(pt[0], pt[1], pt[2].toLong()))
+                }
+                val stroke = android.gesture.GestureStroke(gesturePoints)
+                val gesture = android.gesture.Gesture()
+                gesture.addStroke(stroke)
+
+                FileLogger.log(this@OverlayService, "Gesture", "Trying recognition: ${touchPoints.size} pts, ${gestureDuration}ms, sinuosity=$sinuosity")
+                val result = gestureManager.recognize(gesture)
+                if (result != null) {
+                    val (name, score) = result
+                    val actionId = gestureManager.getActionForGesture(name)
+                    if (actionId != null) {
+                        FileLogger.log(this@OverlayService, "Gesture", "Recognized: $name (score=$score) -> $actionId")
+                        executeAction(actionId)
+                        return true
+                    }
+                }
+                FileLogger.log(this@OverlayService, "Gesture", "No match (result=$result)")
+                return false
             }
         })
     }
@@ -771,187 +892,469 @@ Output:
     private var menuView: View? = null
     private var isAskLlamaActive = false
     private var isSettingsAIActive = false
+    private var pendingTranslateLang: String? = null  // e.g. "Spanisch", "Englisch", "Deutsch"
+
     private var menuCloseTime: Long = 0L
     
-    private fun showMenu() {
-        FileLogger.log(this, "Menu", "showMenu() called. current menuView presence: ${menuView != null}")
-        if (menuView != null) return // Already open
-        
-        try {
-            val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
-            val inflater = LayoutInflater.from(this)
-            val view = inflater.inflate(R.layout.menu_overlay, null)
-            if (view == null) {
-                FileLogger.log(this, "Menu", "ERROR: Inflated menuView is NULL")
-                return
+    // --- GESTURE ACTION DISPATCH ---
+    private fun executeAction(actionId: String) {
+        when (actionId) {
+            "start_recording" -> { startRecording(); isRecording = true }
+            "clipboard_capture" -> {
+                val intent = Intent(this, com.example.voicelistener.FocusedCaptureActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                try { startActivity(intent) } catch (e: Exception) {
+                    FileLogger.log(this, "Action", "Launch Capture Error: ${e.message}")
+                }
             }
-            menuView = view
-            
-            menuParams = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-                PixelFormat.TRANSLUCENT
-            )
-            menuParams?.gravity = Gravity.TOP or Gravity.START
-            
-            // Position near the button with screen bound safety
-            val displayMetrics = resources.displayMetrics
-            val screenWidth = displayMetrics.widthPixels
-            val screenHeight = displayMetrics.heightPixels
-            
-            val buttonX = params?.x ?: 0
-            val buttonY = params?.y ?: 0
-            val buttonWidth = params?.width ?: 0
-            val buttonHeight = params?.height ?: 0
-            
-            // Default offset
-            var targetX = buttonX + buttonWidth / 2
-            var targetY = buttonY + buttonHeight + (10 * displayMetrics.density).toInt()
-            
-            // Basic screen bounds check (assuming menu size ~200dp for calculation before addView)
-            val menuApproxSize = (200 * displayMetrics.density).toInt()
-            
-            if (targetX + menuApproxSize > screenWidth) {
-                targetX = buttonX - menuApproxSize
-            }
-            if (targetY + menuApproxSize > screenHeight) {
-                targetY = buttonY - menuApproxSize
-            }
-            
-            menuParams?.x = kotlin.math.max(0, targetX)
-            menuParams?.y = kotlin.math.max(0, targetY)
-            
-            // Setup Buttons
-            menuView?.findViewById<View>(R.id.btnSettings)?.setOnClickListener {
-                closeMenu()
+            "toggle_menu" -> { if (menuView != null) closeMenu() else showMenu() }
+            "hide_button" -> hideOverlayButton()
+            "show_volume" -> actionShowVolume()
+            "toggle_mute" -> actionToggleMute()
+            "media_play_pause" -> actionMediaPlayPause()
+            "show_notifications" -> actionShowNotifications()
+            "show_translator" -> showTranslator()
+            "show_clipboard_history" -> showClipboardHistory()
+            "toggle_market_data" -> toggleMarketDataWidget()
+            "toggle_ask_llama" -> { isAskLlamaActive = !isAskLlamaActive; showTopMessage(if (isAskLlamaActive) "AskLlama AN" else "AskLlama AUS") }
+            "open_settings" -> {
                 val intent = Intent(this, com.example.voicelistener.MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 }
                 startActivity(intent)
             }
-            
-            // Keyboard Button removed as per user request
-            
-            menuView?.findViewById<View>(R.id.btnTranslate)?.setOnClickListener {
-                closeMenu()
-                showTranslator()
-            }
-            
-            menuView?.findViewById<View>(R.id.btnClipboard)?.setOnClickListener {
-                closeMenu()
-                showClipboardHistory()
-            }
-            
-            menuView?.findViewById<View>(R.id.btnMarketData)?.setOnClickListener {
-                closeMenu()
-                toggleMarketDataWidget()
-            }
-            
-            val btnAskLlama = menuView?.findViewById<android.widget.Button>(R.id.btnAskLlama)
-            val btnSettingsAI = menuView?.findViewById<android.widget.Button>(R.id.btnSettingsAI)
+            else -> FileLogger.log(this, "Action", "Unknown action: $actionId")
+        }
+    }
 
-            fun updateAskLlamaBtn() {
-                if (isAskLlamaActive) {
-                    btnAskLlama?.text = "askLlama (Aktiv)"
-                    btnAskLlama?.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#4CAF50"))
-                } else {
-                    btnAskLlama?.text = "askLlama (Aus)"
-                    btnAskLlama?.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#607D8B"))
-                }
-            }
-            fun updateSettingsAIBtn() {
-                if (isSettingsAIActive) {
-                    btnSettingsAI?.text = "Settings AI (Aktiv)"
-                    btnSettingsAI?.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#4CAF50"))
-                } else {
-                    btnSettingsAI?.text = "Settings AI (Aus)"
-                    btnSettingsAI?.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#795548"))
-                }
-            }
-            updateAskLlamaBtn()
-            updateSettingsAIBtn()
+    private fun actionShowVolume() {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val currentVol = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+        val maxVol = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
 
-            btnAskLlama?.setOnClickListener {
-                isAskLlamaActive = !isAskLlamaActive
-                if (isAskLlamaActive) isSettingsAIActive = false
-                updateAskLlamaBtn()
-                updateSettingsAIBtn()
-            }
-            btnSettingsAI?.setOnClickListener {
-                isSettingsAIActive = !isSettingsAIActive
-                if (isSettingsAIActive) isAskLlamaActive = false
-                updateSettingsAIBtn()
-                updateAskLlamaBtn()
-            }
+        if (currentVol < maxVol) {
+            audioManager.adjustStreamVolume(
+                android.media.AudioManager.STREAM_MUSIC,
+                android.media.AudioManager.ADJUST_RAISE,
+                android.media.AudioManager.FLAG_SHOW_UI
+            )
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, currentVol, 0)
+            }, 50)
+        } else {
+            audioManager.adjustStreamVolume(
+                android.media.AudioManager.STREAM_MUSIC,
+                android.media.AudioManager.ADJUST_LOWER,
+                android.media.AudioManager.FLAG_SHOW_UI
+            )
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, currentVol, 0)
+            }, 50)
+        }
+    }
 
-            // Visibility Check for Extra Apps
-            if (!prefs.getBoolean("app_translate_enabled", true)) {
-                menuView?.findViewById<View>(R.id.btnTranslate)?.visibility = View.GONE
-            }
-            if (!prefs.getBoolean("app_clipboard_enabled", true)) {
-                menuView?.findViewById<View>(R.id.btnClipboard)?.visibility = View.GONE
-            }
-            if (!prefs.getBoolean("app_market_enabled", false)) {
-                menuView?.findViewById<View>(R.id.btnMarketData)?.visibility = View.GONE
-            }
-            if (!prefs.getBoolean("app_askllama_enabled", true)) {
-                menuView?.findViewById<View>(R.id.btnAskLlama)?.visibility = View.GONE
-            }
+    private fun actionToggleMute() {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val currentVol = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
 
-            // Visibility Toggle Row
-            val btnVisibility = menuView?.findViewById<android.widget.Button>(R.id.btnVisibilityToggle)
-            val isAuto = prefs.getBoolean("overlay_focus_mode", false)
-            val isAlwaysHidden = prefs.getBoolean("overlay_always_hidden", false)
-            val visText = when {
-                isAlwaysHidden -> "Sichtbarkeit: Versteckt"
-                isAuto -> "Sichtbarkeit: Auto"
-                else -> "Sichtbarkeit: Immer"
-            }
-            val visColor = when {
-                isAlwaysHidden -> Color.parseColor("#F44336")
-                isAuto -> Color.parseColor("#FF9800")
-                else -> Color.parseColor("#4CAF50")
-            }
-            btnVisibility?.text = visText
-            btnVisibility?.backgroundTintList = ColorStateList.valueOf(visColor)
+        if (savedVolumeBeforeMute == -1) {
+            savedVolumeBeforeMute = if (currentVol > 0) currentVol else 1
+            audioManager.setStreamVolume(
+                android.media.AudioManager.STREAM_MUSIC, 0,
+                android.media.AudioManager.FLAG_SHOW_UI
+            )
+            showTopMessage("Stummgeschaltet")
+        } else {
+            audioManager.setStreamVolume(
+                android.media.AudioManager.STREAM_MUSIC, savedVolumeBeforeMute,
+                android.media.AudioManager.FLAG_SHOW_UI
+            )
+            val maxVol = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            val pct = (savedVolumeBeforeMute.toFloat() / maxVol * 100).toInt()
+            showTopMessage("Lautstärke: $pct%")
+            savedVolumeBeforeMute = -1
+        }
+    }
 
-            btnVisibility?.setOnClickListener {
-                val current = prefs.getBoolean("overlay_focus_mode", false)
-                val newValue = !current
-                prefs.edit()
-                    .putBoolean("overlay_focus_mode", newValue)
-                    .putBoolean("overlay_always_hidden", false)
-                    .apply()
+    private fun actionMediaPlayPause() {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val keyDown = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+        val keyUp = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+        audioManager.dispatchMediaKeyEvent(keyDown)
+        audioManager.dispatchMediaKeyEvent(keyUp)
 
-                btnVisibility?.text = if (newValue) "Sichtbarkeit: Auto" else "Sichtbarkeit: Immer"
-                btnVisibility?.backgroundTintList = ColorStateList.valueOf(if (newValue) Color.parseColor("#FF9800") else Color.parseColor("#4CAF50"))
+        if (audioManager.isMusicActive) {
+            showTopMessage("Pause")
+        } else {
+            showTopMessage("Play")
+        }
+    }
 
-                overlayView?.visibility = View.VISIBLE
-                startForegroundNotification(false)
-                if (newValue) {
-                    checkHideOverlay()
-                }
-            }
-            
-            // Close on touch outside
-             menuView?.setOnTouchListener { _: View, event: MotionEvent ->
-                if (event.action == MotionEvent.ACTION_OUTSIDE) {
+    private fun actionShowNotifications() {
+        @Suppress("WrongConstant")
+        try {
+            val statusBarService = getSystemService("statusbar")
+            val statusBarManager = statusBarService.javaClass
+            val expandMethod = statusBarManager.getMethod("expandNotificationsPanel")
+            expandMethod.invoke(statusBarService)
+        } catch (e: Exception) {
+            FileLogger.log(this, "Swipe", "Notification bar error: ${e.message}")
+            showTopMessage("Benachrichtigungen nicht verfügbar")
+        }
+    }
+
+    private fun showMenu() {
+        FileLogger.log(this, "Menu", "showMenu() called. current menuView presence: ${menuView != null}")
+        if (menuView != null) return // Already open
+
+        try {
+            val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+            val density = resources.displayMetrics.density
+            val screenWidth = resources.displayMetrics.widthPixels
+            val screenHeight = resources.displayMetrics.heightPixels
+
+            // Button center in screen coordinates
+            val btnX = (params?.x ?: 0) + (overlayButton?.width ?: 0) / 2
+            val btnY = (params?.y ?: 0) + (overlayButton?.height ?: 0) / 2
+
+            // Determine which side has more space -> fan opens away from screen edge
+            val buttonOnRight = btnX > screenWidth / 2
+            val buttonOnBottom = btnY > screenHeight / 2
+
+            // Build menu items from config
+            data class RadialItem(val icon: String, val label: String, val color: String, val action: () -> Unit)
+
+            // Read radial menu config (ordered list of enabled item IDs)
+            val configJson = prefs.getString("radial_menu_config", null)
+            val enabledIds = if (configJson != null) {
+                try {
+                    val arr = org.json.JSONArray(configJson)
+                    (0 until arr.length()).map { arr.getString(it) }
+                } catch (_: Exception) { null }
+            } else null
+            // Fallback: all items in default order
+            val orderedIds = enabledIds ?: ALL_RADIAL_ITEMS.map { it.id }
+
+            val actionMap = mapOf<String, () -> RadialItem>(
+                "translate_es" to { RadialItem("ES", "Spanisch", "#E91E63") {
+                    closeMenu(); pendingTranslateLang = "Spanisch"; isAskLlamaActive = false; isSettingsAIActive = false
+                    startRecording(); isRecording = true
+                }},
+                "translate_en" to { RadialItem("EN", "Englisch", "#2196F3") {
+                    closeMenu(); pendingTranslateLang = "Englisch"; isAskLlamaActive = false; isSettingsAIActive = false
+                    startRecording(); isRecording = true
+                }},
+                "translate_de" to { RadialItem("DE", "Deutsch", "#FF9800") {
+                    closeMenu(); pendingTranslateLang = "Deutsch"; isAskLlamaActive = false; isSettingsAIActive = false
+                    startRecording(); isRecording = true
+                }},
+                "translator" to { RadialItem("\uD83D\uDD04", "Übersetzen", "#BB86FC") {
+                    closeMenu(); showTranslator()
+                }},
+                "clipboard" to { RadialItem("\uD83D\uDCCB", "Clipboard", "#03DAC5") {
+                    closeMenu(); showClipboardHistory()
+                }},
+                "market" to { RadialItem("\uD83D\uDCC8", "Markt", "#4CAF50") {
+                    closeMenu(); toggleMarketDataWidget()
+                }},
+                "ask_llama" to { RadialItem("\uD83E\uDD99", "Llama", if (isAskLlamaActive) "#4CAF50" else "#607D8B") {
+                    isAskLlamaActive = !isAskLlamaActive
+                    if (isAskLlamaActive) isSettingsAIActive = false
+                    if (isAskLlamaActive) { closeMenu(); startRecording(); isRecording = true } else closeMenu()
+                }},
+                "settings_ai" to { RadialItem("\uD83E\uDD16", "AI Set.", if (isSettingsAIActive) "#4CAF50" else "#795548") {
+                    isSettingsAIActive = !isSettingsAIActive
+                    if (isSettingsAIActive) isAskLlamaActive = false
+                    if (isSettingsAIActive) { closeMenu(); startRecording(); isRecording = true } else closeMenu()
+                }},
+                "fix_text" to { RadialItem("\u270F", "Fix Text", "#00BCD4") {
+                    closeMenu(); fixCurrentText()
+                }},
+                "timeout" to { RadialItem("\u23F1", "Timeout", "#FF5722") {
+                    closeMenu(); showScreenTimeoutPicker()
+                }},
+                "settings" to { RadialItem("\u2699", "Settings", "#6200EE") {
                     closeMenu()
-                    true
-                } else {
-                    false
-                }
+                    startActivity(Intent(this, com.example.voicelistener.MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    })
+                }}
+            )
+
+            val items = orderedIds.mapNotNull { id -> actionMap[id]?.invoke() }
+            if (items.isEmpty()) {
+                showTopMessage("Keine Menü-Items aktiviert")
+                return
             }
-            
-            FileLogger.log(this, "Menu", "Adding menuView to windowManager...")
+
+            val btnSize = (48 * density).toInt()
+            val minGap = (8 * density)  // minimum gap between button edges
+            val minSpacing = btnSize + minGap  // minimum center-to-center distance
+
+            // Calculate radius so buttons don't overlap:
+            // Arc distance between adjacent buttons = radius * angleStep >= minSpacing
+            // For N items over a given angle range, angleStep = totalAngle / (N-1)
+            // So radius >= minSpacing / angleStep = minSpacing * (N-1) / totalAngle
+
+            // Determine max arc angle based on item count (allow up to 300° for many items)
+            val maxArcDeg = if (items.size <= 5) 180.0
+                else kotlin.math.min(180.0 + (items.size - 5) * 20.0, 300.0)
+
+            val maxArcRad = Math.toRadians(maxArcDeg)
+            val minRadius = if (items.size > 1) {
+                (minSpacing * (items.size - 1) / maxArcRad).toFloat()
+            } else 80f * density
+
+            val radius = kotlin.math.max(minRadius, 80f * density)
+            // Recalculate actual arc needed at this radius
+            val actualArc = if (items.size > 1) {
+                val neededArc = (minSpacing * (items.size - 1)) / radius
+                kotlin.math.min(neededArc.toDouble(), maxArcRad)
+            } else 0.0
+
+            // Container size based on radius
+            val containerSize = (2 * radius + btnSize + 20 * density).toInt()
+            val containerW = containerSize
+            val containerH = containerSize
+            val container = android.widget.FrameLayout(this).apply {
+                minimumWidth = containerW
+                minimumHeight = containerH
+            }
+
+            val centerX = containerW / 2f
+            val centerY = containerH / 2f
+
+            // Fan direction: button on right -> fan left, button on left -> fan right
+            val midAngle = if (buttonOnRight) Math.toRadians(180.0) else Math.toRadians(0.0)
+            val startAngle = midAngle - actualArc / 2
+            val endAngle = midAngle + actualArc / 2
+            val angleStep = if (items.size > 1) actualArc / (items.size - 1) else 0.0
+
+            for ((index, item) in items.withIndex()) {
+                val angle = startAngle + angleStep * index
+                val ix = (centerX + radius * kotlin.math.cos(angle) - btnSize / 2).toInt()
+                val iy = (centerY + radius * kotlin.math.sin(angle) - btnSize / 2).toInt()
+
+                val btn = android.widget.TextView(this).apply {
+                    text = item.icon
+                    textSize = 18f
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.WHITE)
+
+                    val gd = android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.OVAL
+                        setColor(Color.parseColor(item.color))
+                    }
+                    background = gd
+                    elevation = 8f
+                    setOnClickListener { item.action() }
+
+                    // Long press shows label
+                    setOnLongClickListener {
+                        showTopMessage(item.label)
+                        true
+                    }
+                }
+
+                val lp = android.widget.FrameLayout.LayoutParams(btnSize, btnSize).apply {
+                    leftMargin = ix
+                    topMargin = iy
+                }
+                container.addView(btn, lp)
+            }
+
+            // Close button in center
+            val closeBtn = android.widget.TextView(this).apply {
+                text = "\u2716"
+                textSize = 20f
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                val gd = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(Color.parseColor("#44FFFFFF"))
+                }
+                background = gd
+                setOnClickListener { closeMenu() }
+            }
+            val closeLp = android.widget.FrameLayout.LayoutParams(btnSize, btnSize).apply {
+                leftMargin = (centerX - btnSize / 2).toInt()
+                topMargin = (centerY - btnSize / 2).toInt()
+            }
+            container.addView(closeBtn, closeLp)
+
+            menuView = container
+            menuParams = WindowManager.LayoutParams(
+                containerW, containerH,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                // Position so center aligns with button center
+                x = kotlin.math.max(0, kotlin.math.min(btnX - containerW / 2, screenWidth - containerW))
+                y = kotlin.math.max(0, kotlin.math.min(btnY - containerH / 2, screenHeight - containerH))
+            }
+
+            // Close on touch outside
+            container.setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_OUTSIDE) { closeMenu(); true } else false
+            }
+
+            makeBackDismissible(container, menuParams!!) { closeMenu() }
+            dimView?.visibility = View.VISIBLE
             windowManager.addView(menuView, menuParams)
-            FileLogger.log(this, "Menu", "menuView added successfully")
-            
+            FileLogger.log(this, "Menu", "Radial menu added successfully")
+
         } catch (e: Exception) {
             FileLogger.log(this, "Menu", "Error showing menu: ${e.message}")
         }
+    }
+
+    private fun fixCurrentText() {
+        val a11y = VoiceAccessibilityService.instance
+        if (a11y == null) {
+            showTopMessage("Accessibility Service nicht aktiv")
+            FileLogger.log(this, "FixText", "Aborted: AccessibilityService instance is null")
+            return
+        }
+
+        val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+        val apiKey = prefs.getString("groq_api_key", "") ?: ""
+        if (apiKey.isEmpty()) { showTopMessage("API Key fehlt!"); return }
+
+        // Delay needed: after closeMenu() removes the overlay window,
+        // Android needs time to shift focus back to the underlying app's input field.
+        serviceScope.launch {
+            delay(400) // wait for focus to settle after menu close
+
+            val originalText = withContext(Dispatchers.Main) {
+                val text = a11y.getCurrentInputText()
+                FileLogger.log(this@OverlayService, "FixText", "Read input text: '${text?.take(80)}' (null=${text == null})")
+                text
+            }
+
+            if (originalText.isNullOrBlank()) {
+                withContext(Dispatchers.Main) { showTopMessage("Kein Text im Eingabefeld") }
+                return@launch
+            }
+
+            withContext(Dispatchers.Main) { showTopMessage("Text wird korrigiert...") }
+
+            try {
+                val vocabulary = prefs.getString("custom_vocabulary", "") ?: ""
+                val promptBase = "You are a proofreader. Fix all grammar, spelling, and punctuation errors in the following text. Keep the original language. Output ONLY the corrected text, nothing else. No explanations, no quotes."
+                val prompt = if (vocabulary.isNotBlank()) {
+                    "$promptBase\n\nCONTEXT / VOCABULARY (use correct spellings for names, brands, technical terms if they appear):\n$vocabulary"
+                } else promptBase
+                val response = chatWithFallback("Bearer $apiKey", listOf(Message("system", prompt), Message("user", originalText)))
+                val fixed = response.choices.firstOrNull()?.message?.content ?: originalText
+                FileLogger.log(this@OverlayService, "FixText", "API returned: '${fixed.take(80)}'")
+
+                withContext(Dispatchers.Main) {
+                    // Safety check: verify the text in the field hasn't changed since we read it
+                    val textNow = a11y.getCurrentInputText()
+                    if (textNow == null) {
+                        showTopMessage("Eingabefeld nicht mehr verfügbar")
+                        return@withContext
+                    }
+                    if (textNow != originalText) {
+                        showTopMessage("Text wurde geändert — Korrektur abgebrochen")
+                        FileLogger.log(this@OverlayService, "FixText", "Aborted: field text changed during API call")
+                        return@withContext
+                    }
+                    if (fixed == originalText) {
+                        showTopMessage("Text ist bereits korrekt")
+                        return@withContext
+                    }
+                    val success = a11y.replaceCurrentInputText(fixed)
+                    FileLogger.log(this@OverlayService, "FixText", "replaceCurrentInputText success=$success")
+                    if (success) {
+                        showTopMessage("Text korrigiert")
+                    } else {
+                        showTopMessage("Ersetzen fehlgeschlagen")
+                    }
+                }
+            } catch (e: Exception) {
+                FileLogger.log(this@OverlayService, "FixText", "Error: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    showTopMessage("Fehler: ${e.message?.take(50)}")
+                }
+            }
+        }
+    }
+
+    private fun showScreenTimeoutPicker() {
+        val options = arrayOf("30 Sek", "2 Min", "5 Min", "10 Min", "30 Min")
+        val values = intArrayOf(30000, 120000, 300000, 600000, 1800000)
+
+        val density = resources.displayMetrics.density
+        val layout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#DD222222"))
+            setPadding(32, 24, 32, 24)
+        }
+        val title = android.widget.TextView(this).apply {
+            text = "Screen Timeout"
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            setPadding(0, 0, 0, 16)
+        }
+        layout.addView(title)
+
+        for (i in options.indices) {
+            val btn = android.widget.TextView(this).apply {
+                text = options[i]
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                setPadding(24, 16, 24, 16)
+                setBackgroundResource(android.R.drawable.list_selector_background)
+                setOnClickListener {
+                    try {
+                        android.provider.Settings.System.putInt(
+                            contentResolver,
+                            android.provider.Settings.System.SCREEN_OFF_TIMEOUT,
+                            values[i]
+                        )
+                        showTopMessage("Timeout: ${options[i]}")
+                    } catch (e: Exception) {
+                        showTopMessage("Fehler: WRITE_SETTINGS nötig")
+                    }
+                    closeTimeoutPicker()
+                }
+            }
+            layout.addView(btn)
+        }
+
+        val pickerParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.CENTER }
+
+        layout.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_OUTSIDE) { closeTimeoutPicker(); true } else false
+        }
+
+        timeoutPickerView = layout
+        timeoutPickerParams = pickerParams
+        makeBackDismissible(layout, pickerParams) { closeTimeoutPicker() }
+        windowManager.addView(layout, pickerParams)
+    }
+
+    private var timeoutPickerView: View? = null
+    private var timeoutPickerParams: WindowManager.LayoutParams? = null
+
+    private fun closeTimeoutPicker() {
+        timeoutPickerView?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+        }
+        timeoutPickerView = null
     }
     
     private fun closeMenu() {
@@ -961,6 +1364,7 @@ Output:
             } catch (e: Exception) {}
             menuView = null
             menuCloseTime = System.currentTimeMillis()
+            dimView?.visibility = View.GONE
         }
     }
 
@@ -995,6 +1399,7 @@ Output:
             }
             marketDataView = null
         }
+        clearMarketNotification()
     }
 
     private fun showMarketDataWidget() {
@@ -1002,6 +1407,10 @@ Output:
             isMarketDataMinimized = false
             val inflater = LayoutInflater.from(this)
             marketDataView = inflater.inflate(R.layout.widget_market_data, null)
+
+            // Apply saved font size
+            val savedWidgetFontSize = getSharedPreferences("app_prefs", MODE_PRIVATE).getFloat("market_widget_font_size", 12f)
+            marketDataView?.findViewById<android.widget.TextView>(R.id.tvMarketData)?.textSize = savedWidgetFontSize
 
             marketDataParams = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -1102,17 +1511,27 @@ Output:
                                                     tv.text = spanned
                                                     tv.maxLines = 10
                                                 } else {
-                                                    // Minimized: show only first value
-                                                    val firstEntry = fullHtml.split("&nbsp;").firstOrNull() ?: ""
+                                                    // Minimized: show configured number of values
+                                                    val minValues = currentPrefs.getInt("market_min_values", 1)
+                                                    val entries = fullHtml.split("&nbsp;&nbsp;&nbsp;").filter { it.isNotBlank() }
+                                                    val limitedHtml = entries.take(minValues).joinToString("  ")
                                                     tv.text = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                                        android.text.Html.fromHtml(firstEntry, android.text.Html.FROM_HTML_MODE_COMPACT)
+                                                        android.text.Html.fromHtml(limitedHtml, android.text.Html.FROM_HTML_MODE_COMPACT)
                                                     } else {
                                                         @Suppress("DEPRECATION")
-                                                        android.text.Html.fromHtml(firstEntry)
+                                                        android.text.Html.fromHtml(limitedHtml)
                                                     }
-                                                    tv.maxLines = 1
+                                                    tv.maxLines = minValues
                                                 }
                                             }
+                                            // Update status bar overlay if enabled
+                                            if (currentPrefs.getBoolean("market_notification_enabled", false)) {
+                                                updateMarketNotification(fullHtml)
+                                            }
+                                            // Update home screen widget cache (HTML with colors)
+                                            val widgetHtml = fullHtml.split("&nbsp;&nbsp;&nbsp;").filter { it.isNotBlank() }.joinToString("<br/>")
+                                            currentPrefs.edit().putString("market_widget_cache", widgetHtml).apply()
+                                            com.example.voicelistener.MarketDataWidget.updateAllWidgets(this@OverlayService)
                                         }
                                     }
                                 }
@@ -1140,25 +1559,16 @@ Output:
         isMarketDataMinimized = !isMarketDataMinimized
 
         if (isMarketDataMinimized) {
-            // Minimize: show only first value, hide close button, dock to edge
+            // Minimize: show configured number of values, hide close button, dock to left edge
+            val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+            val minValues = prefs.getInt("market_min_values", 1)
             val fullText = marketDataFullText.toString()
-            val firstPart = fullText.split("   ").firstOrNull()?.trim() ?: fullText
-            tv.text = firstPart
-            tv.maxLines = 1
+            val parts = fullText.split("   ").filter { it.isNotBlank() }
+            tv.text = parts.take(minValues).joinToString("  ").trim()
+            tv.maxLines = minValues
             closeBtn?.visibility = View.GONE
 
-            // Dock to nearest edge (left or right)
-            val currentX = marketDataParams?.x ?: 0
-            val centerX = currentX + (marketDataView?.width ?: 0) / 2
-            if (centerX < screenWidth / 2) {
-                marketDataParams?.x = 0  // Dock left
-            } else {
-                // Dock right - we need to account for view width after layout
-                marketDataView?.post {
-                    marketDataParams?.x = screenWidth - (marketDataView?.width ?: 0)
-                    try { windowManager.updateViewLayout(marketDataView, marketDataParams) } catch (_: Exception) {}
-                }
-            }
+            marketDataParams?.x = 0
             try { windowManager.updateViewLayout(marketDataView, marketDataParams) } catch (_: Exception) {}
         } else {
             // Maximize: show all values, show close button, use full width
@@ -1172,7 +1582,106 @@ Output:
         }
     }
 
+    private val MARKET_NOTIFICATION_ID = 42
+    private val CHANNEL_ID_MARKET = "VoiceListenerMarket"
+    private var lastMarketIconText: String? = null
+    private var cachedMarketIcon: androidx.core.graphics.drawable.IconCompat? = null
+
+    private fun createMarketNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(NotificationManager::class.java)
+            if (manager.getNotificationChannel(CHANNEL_ID_MARKET) == null) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID_MARKET,
+                    "Marktdaten",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Zeigt Marktdaten in der Status-Bar"
+                    setShowBadge(false)
+                }
+                manager.createNotificationChannel(channel)
+            }
+        }
+    }
+
+    private fun createTextIcon(text: String): android.graphics.Bitmap {
+        val density = resources.displayMetrics.density
+        val size = (24 * density).toInt()
+        val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textAlign = android.graphics.Paint.Align.CENTER
+            // Auto-size text to fit
+            textSize = when {
+                text.length <= 3 -> 11f * density
+                text.length <= 5 -> 8f * density
+                else -> 6.5f * density
+            }
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+        val x = size / 2f
+        val y = size / 2f - (paint.ascent() + paint.descent()) / 2f
+        canvas.drawText(text, x, y, paint)
+        return bitmap
+    }
+
+    private fun updateMarketNotification(fullHtml: String) {
+        val entries = fullHtml.split("&nbsp;&nbsp;&nbsp;").filter { it.isNotBlank() }
+        val parsed = entries.map { entry ->
+            val plain = entry.replace(Regex("<[^>]*>"), "").replace("&nbsp;", " ").trim()
+            plain
+        }
+        if (parsed.isEmpty()) return
+
+        // Extract short price for icon (e.g. "BTC: 85000.50 (+2.5%)" -> "85000")
+        val firstEntry = parsed.first()
+        val priceMatch = Regex(":\\s*([\\d.]+)").find(firstEntry)
+        val shortPrice = priceMatch?.groupValues?.get(1)?.let {
+            // Remove decimals and shorten for icon
+            val intPart = it.substringBefore(".")
+            if (intPart.length > 5) intPart.substring(0, 3) + "k" else intPart
+        } ?: "---"
+
+        // Full text for notification body
+        val bodyText = parsed.joinToString("  |  ") { it.replace(Regex("\\s*\\([^)]*\\)"), "").trim() }
+
+        createMarketNotificationChannel()
+        // Only regenerate bitmap if price text actually changed
+        if (shortPrice != lastMarketIconText) {
+            val icon = createTextIcon(shortPrice)
+            cachedMarketIcon = androidx.core.graphics.drawable.IconCompat.createWithBitmap(icon)
+            lastMarketIconText = shortPrice
+        }
+        val iconCompat = cachedMarketIcon ?: return
+
+        val openIntent = PendingIntent.getActivity(
+            this, 10,
+            Intent(this, com.example.voicelistener.MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID_MARKET)
+            .setSmallIcon(iconCompat)
+            .setContentTitle("Marktdaten")
+            .setContentText(bodyText)
+            .setOngoing(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(openIntent)
+            .build()
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(MARKET_NOTIFICATION_ID, notification)
+    }
+
+    private fun clearMarketNotification() {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.cancel(MARKET_NOTIFICATION_ID)
+    }
+
     private fun showMarketDataContextMenu() {
+        val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
         val items = if (isMarketDataFullscreen) {
             arrayOf("Verstecken", "Fullscreen schließen", "Hilfe")
         } else {
@@ -1194,6 +1703,78 @@ Output:
         ).apply {
             gravity = Gravity.CENTER
         }
+
+        // Font size controls row
+        val fontSizeKey = if (isMarketDataFullscreen) "market_fullscreen_font_size" else "market_widget_font_size"
+        val defaultSize = if (isMarketDataFullscreen) 28f else 12f
+        var currentSize = prefs.getFloat(fontSizeKey, defaultSize)
+
+        val sizeRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(48, 16, 48, 16)
+        }
+        val sizeLabel = android.widget.TextView(this).apply {
+            text = "Schrift: ${currentSize.toInt()}sp"
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 16f
+            layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val btnSmaller = android.widget.TextView(this).apply {
+            text = " A- "
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 20f
+            setPadding(32, 16, 32, 16)
+            setBackgroundColor(android.graphics.Color.parseColor("#44FFFFFF"))
+        }
+        val btnBigger = android.widget.TextView(this).apply {
+            text = " A+ "
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 20f
+            setPadding(32, 16, 32, 16)
+            setBackgroundColor(android.graphics.Color.parseColor("#44FFFFFF"))
+        }
+
+        fun applyFontSize(newSize: Float) {
+            currentSize = newSize
+            prefs.edit().putFloat(fontSizeKey, newSize).apply()
+            sizeLabel.text = "Schrift: ${newSize.toInt()}sp"
+            if (isMarketDataFullscreen) {
+                val fsView = marketDataFullscreenView ?: return
+                val tv = (fsView as? android.widget.FrameLayout)?.getChildAt(0) as? android.widget.TextView
+                tv?.textSize = newSize
+            } else {
+                val tv = marketDataView?.findViewById<android.widget.TextView>(R.id.tvMarketData)
+                tv?.textSize = newSize
+            }
+        }
+
+        btnSmaller.setOnClickListener {
+            val newSize = (currentSize - 1f).coerceAtLeast(6f)
+            applyFontSize(newSize)
+        }
+        btnBigger.setOnClickListener {
+            val newSize = (currentSize + 1f).coerceAtMost(80f)
+            applyFontSize(newSize)
+        }
+
+        sizeRow.addView(sizeLabel)
+        sizeRow.addView(btnSmaller)
+        val spacer = android.widget.Space(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams((8 * resources.displayMetrics.density).toInt(), 1)
+        }
+        sizeRow.addView(spacer)
+        sizeRow.addView(btnBigger)
+        menuLayout.addView(sizeRow)
+
+        // Divider
+        val divider = View(this).apply {
+            setBackgroundColor(android.graphics.Color.parseColor("#44FFFFFF"))
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 1
+            ).apply { topMargin = 8; bottomMargin = 8 }
+        }
+        menuLayout.addView(divider)
 
         for (item in items) {
             val btn = android.widget.TextView(this@OverlayService).apply {
@@ -1225,6 +1806,9 @@ Output:
             } else false
         }
 
+        makeBackDismissible(menuLayout, menuParams) {
+            try { windowManager.removeView(menuLayout) } catch (_: Exception) {}
+        }
         try { windowManager.addView(menuLayout, menuParams) } catch (e: Exception) {
             FileLogger.log(this, "MarketData", "Error showing context menu: ${e.message}")
         }
@@ -1303,6 +1887,9 @@ Output:
             gravity = Gravity.CENTER
         }
 
+        makeBackDismissible(helpLayout, helpParams) {
+            try { windowManager.removeView(helpLayout) } catch (_: Exception) {}
+        }
         try { windowManager.addView(helpLayout, helpParams) } catch (e: Exception) {
             FileLogger.log(this, "MarketData", "Error showing help: ${e.message}")
         }
@@ -1336,10 +1923,11 @@ Output:
 
         // Format text with line breaks for fullscreen
         val fsText = marketDataFullText.toString().replace("   ", "\n")
+        val savedFsFontSize = getSharedPreferences("app_prefs", MODE_PRIVATE).getFloat("market_fullscreen_font_size", 28f)
         val tvFullscreen = android.widget.TextView(this).apply {
             text = fsText
             setTextColor(android.graphics.Color.WHITE)
-            textSize = 28f
+            textSize = savedFsFontSize
             setPadding(48, 48, 48, 48)
             gravity = Gravity.CENTER
         }
@@ -1378,6 +1966,7 @@ Output:
             true
         }
 
+        makeBackDismissible(fsLayout, fsParams) { closeMarketDataFullscreen() }
         marketDataFullscreenView = fsLayout
         try { windowManager.addView(fsLayout, fsParams) } catch (e: Exception) {
             FileLogger.log(this, "MarketData", "Error showing fullscreen: ${e.message}")
@@ -1642,6 +2231,7 @@ Output:
                  closeClipboardHistory()
             }
 
+            makeBackDismissible(clipboardView!!, params) { closeClipboardHistory() }
             windowManager.addView(clipboardView, params)
             
             // Sync clipboard to capture items copied outside the app
@@ -1952,6 +2542,7 @@ Output:
                  }
             }
             
+            makeBackDismissible(translateView!!, trParams) { closeTranslator() }
             windowManager.addView(translateView, trParams)
 
             // Re-add overlay button on top so it stays above the translator dialog
@@ -1989,15 +2580,7 @@ Output:
                 val prompt = "You are a professional translator. Translate the following text to $targetLang. Output ONLY the translation, nothing else."
                 val userMsg = "Text to translate:\n$source"
                 
-                val request = ChatRequest(
-                    model = "llama-3.3-70b-versatile",
-                    messages = listOf(
-                        Message("system", prompt),
-                        Message("user", userMsg)
-                    )
-                )
-                
-                val response = GroqClient.api.chatCompletion("Bearer $apiKey", request)
+                val response = chatWithFallback("Bearer $apiKey", listOf(Message("system", prompt), Message("user", userMsg)))
                 val translation = response.choices.firstOrNull()?.message?.content ?: "[Fehler]"
                 
                 withContext(Dispatchers.Main) {
@@ -2046,6 +2629,7 @@ Output:
         // Set "always hidden" so Auto-Hide doesn't bring it back
         prefs.edit().putBoolean("overlay_always_hidden", true).apply()
         overlayView?.visibility = View.GONE
+        dimView?.visibility = View.GONE
         closeMenu()
         startForegroundNotification(true)
         showTopMessage("Button versteckt (Notification zum Wiederherstellen)")
@@ -2091,6 +2675,7 @@ Output:
         
         // 5. HIDE
         overlayView?.visibility = View.GONE
+        dimView?.visibility = View.GONE
         startForegroundNotification(true)
     }
 
@@ -2204,7 +2789,16 @@ Output:
                     val resolvedSystemPrompt: String
                     val resolvedUserPrompt: String
 
-                    if (isSettingsAIActive) {
+                    val translateLang = pendingTranslateLang
+                    if (translateLang != null) {
+                        // Quick Translate Mode: translate the spoken text directly
+                        pendingTranslateLang = null
+                        val translateBase = "You are a professional translator. Translate the following text to $translateLang. Output ONLY the translation, nothing else."
+                        resolvedSystemPrompt = if (vocabulary.isNotBlank()) {
+                            "$translateBase\n\nCONTEXT / VOCABULARY (use correct spellings for names, brands, technical terms if they appear):\n$vocabulary"
+                        } else translateBase
+                        resolvedUserPrompt = rawText
+                    } else if (isSettingsAIActive) {
                         // Settings AI Mode: show confirmation overlay first
                         isSettingsAIActive = false
                         withContext(Dispatchers.Main) {
@@ -2236,15 +2830,10 @@ Output:
                         """.trimIndent()
                     }
                     
-                    val chatRequest = ChatRequest(
-                        model = "llama-3.3-70b-versatile",
-                        messages = listOf(
-                            Message("system", resolvedSystemPrompt), // Keep System Prompt for IDENTITY and VOCABULARY
-                            Message("user", resolvedUserPrompt)
-                        )
-                    )
-                    
-                    val chatResponse = GroqClient.api.chatCompletion(auth, chatRequest)
+                    val chatResponse = chatWithFallback(auth, listOf(
+                        Message("system", resolvedSystemPrompt),
+                        Message("user", resolvedUserPrompt)
+                    ))
                     finalText = chatResponse.choices.firstOrNull()?.message?.content ?: rawText
                     FileLogger.log(this@OverlayService, "API", "Llama Text: $finalText")
                 } else {
@@ -2460,6 +3049,7 @@ Beispiele für Befehle:
             } else false
         }
 
+        makeBackDismissible(container, params) { dismissSettingsAIView(); resetUI(); isProcessing = false }
         windowManager.addView(container, params)
         settingsAIView = container
     }
@@ -2548,6 +3138,7 @@ Beispiele für Befehle:
             }
         }
 
+        makeBackDismissible(scrollView, params) { dismissSettingsAIView() }
         windowManager.addView(scrollView, params)
         settingsAIView = scrollView
     }
@@ -2686,6 +3277,7 @@ Beispiele für Befehle:
             } else false
         }
 
+        makeBackDismissible(container, params) { dismissSettingsAIView(); resetUI(); isProcessing = false }
         windowManager.addView(container, params)
         settingsAIView = container
     }
@@ -2693,14 +3285,10 @@ Beispiele für Befehle:
     private fun executeSettingsAI(userCommand: String, auth: String) {
         serviceScope.launch {
             try {
-                val chatRequest = ChatRequest(
-                    model = "llama-3.3-70b-versatile",
-                    messages = listOf(
-                        Message("system", SETTINGS_AI_SYSTEM_PROMPT),
-                        Message("user", userCommand)
-                    )
-                )
-                val chatResponse = GroqClient.api.chatCompletion(auth, chatRequest)
+                val chatResponse = chatWithFallback(auth, listOf(
+                    Message("system", SETTINGS_AI_SYSTEM_PROMPT),
+                    Message("user", userCommand)
+                ))
                 val responseText = chatResponse.choices.firstOrNull()?.message?.content ?: ""
                 FileLogger.log(this@OverlayService, "SettingsAI", "Response: $responseText")
 
@@ -2786,7 +3374,10 @@ Beispiele für Befehle:
             val allowedStrings = setOf("llama_system_prompt", "custom_vocabulary")
             val colorMap = mapOf(
                 "purple" to "#FF6200EE", "blue" to "#2196F3",
-                "red" to "#F44336", "green" to "#4CAF50", "black" to "#000000"
+                "red" to "#F44336", "green" to "#4CAF50", "black" to "#000000",
+                "white" to "#FFFFFF", "silver" to "#C0C0C0", "gold" to "#FFD700",
+                "orange" to "#FF9800", "pink" to "#E91E63", "cyan" to "#00BCD4",
+                "yellow" to "#FFEB3B"
             )
 
             for (i in 0 until actions.length()) {

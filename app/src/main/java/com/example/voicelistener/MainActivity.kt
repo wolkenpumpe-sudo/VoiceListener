@@ -21,8 +21,11 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.example.voicelistener.services.OverlayService
 import com.google.android.material.textfield.TextInputEditText
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.Spinner
 import android.widget.ScrollView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -42,6 +45,16 @@ class MainActivity : AppCompatActivity() {
             startService(intent)
         }
     }
+
+    private val exportSettingsLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            uri?.let { writeExportToUri(it) }
+        }
+
+    private val importSettingsLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            uri?.let { readImportFromUri(it) }
+        }
 
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
@@ -102,6 +115,19 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
         apiKeyInput.setText(prefs.getString("groq_api_key", ""))
         eqsServerUrlInput.setText(prefs.getString("eqs_server_url", ""))
+
+        // LLM Model Spinner
+        val llmModels = arrayOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3-32b")
+        val llmModelSpinner = findViewById<android.widget.Spinner>(R.id.llmModelSpinner)
+        llmModelSpinner.adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, llmModels)
+        val savedModel = prefs.getString("llm_model", llmModels[0]) ?: llmModels[0]
+        llmModelSpinner.setSelection(llmModels.indexOf(savedModel).coerceAtLeast(0))
+        llmModelSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, pos: Int, id: Long) {
+                prefs.edit().putString("llm_model", llmModels[pos]).apply()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
         
         // Load Prompt
         val defaultPrompt = OverlayService.DEFAULT_PROMPT
@@ -123,34 +149,45 @@ class MainActivity : AppCompatActivity() {
              prefs.edit().putBoolean("llama_enabled", isChecked).apply()
         }
 
+        // --- Radial Menu Config ---
+        setupRadialMenuConfig(prefs)
+
         // --- Extra Apps Setup ---
-        val appTranslateCheck = findViewById<CheckBox>(R.id.appTranslateCheckBox)
-        val appClipboardCheck = findViewById<CheckBox>(R.id.appClipboardCheckBox)
-        val appMarketCheck = findViewById<CheckBox>(R.id.appMarketCheckBox)
-        val appAskLlamaCheck = findViewById<CheckBox>(R.id.appAskLlamaCheckBox)
         val appEqsContextCheck = findViewById<CheckBox>(R.id.appEqsContextCheckBox)
         val marketKeysInput = findViewById<EditText>(R.id.marketKeysInput)
         val marketIntervalInput = findViewById<EditText>(R.id.marketIntervalInput)
         val marketKeysSelectButton = findViewById<Button>(R.id.marketKeysSelectButton)
         val marketKeysDisplay = findViewById<TextView>(R.id.marketKeysDisplay)
 
-        appTranslateCheck.isChecked = prefs.getBoolean("app_translate_enabled", true)
-        appClipboardCheck.isChecked = prefs.getBoolean("app_clipboard_enabled", true)
-        appMarketCheck.isChecked = prefs.getBoolean("app_market_enabled", false)
-        appAskLlamaCheck.isChecked = prefs.getBoolean("app_askllama_enabled", true)
         appEqsContextCheck.isChecked = prefs.getBoolean("app_eqs_context_enabled", true)
         marketKeysInput.setText(prefs.getString("market_data_keys", "US500FU, USTECFU, DE40FU"))
         marketIntervalInput.setText(prefs.getInt("market_data_interval", 1).toString())
         updateMarketKeysDisplay(marketKeysDisplay, prefs)
 
+        // Market minimized values spinner (1-4)
+        val marketMinValuesSpinner = findViewById<android.widget.Spinner>(R.id.marketMinValuesSpinner)
+        val minValuesOptions = arrayOf("1 Wert", "2 Werte", "3 Werte", "4 Werte")
+        marketMinValuesSpinner.adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_item, minValuesOptions)
+            .also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        marketMinValuesSpinner.setSelection(prefs.getInt("market_min_values", 1) - 1)
+        marketMinValuesSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {
+                prefs.edit().putInt("market_min_values", pos + 1).apply()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+
+        // Market notification checkbox
+        val marketNotificationCheck = findViewById<CheckBox>(R.id.marketNotificationCheckBox)
+        marketNotificationCheck.isChecked = prefs.getBoolean("market_notification_enabled", false)
+        marketNotificationCheck.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("market_notification_enabled", isChecked).apply()
+        }
+
         marketKeysSelectButton.setOnClickListener {
             showMarketKeysDialog(marketKeysDisplay, prefs)
         }
 
-        appTranslateCheck.setOnCheckedChangeListener { _, isChecked -> prefs.edit().putBoolean("app_translate_enabled", isChecked).apply() }
-        appClipboardCheck.setOnCheckedChangeListener { _, isChecked -> prefs.edit().putBoolean("app_clipboard_enabled", isChecked).apply() }
-        appMarketCheck.setOnCheckedChangeListener { _, isChecked -> prefs.edit().putBoolean("app_market_enabled", isChecked).apply() }
-        appAskLlamaCheck.setOnCheckedChangeListener { _, isChecked -> prefs.edit().putBoolean("app_askllama_enabled", isChecked).apply() }
         appEqsContextCheck.setOnCheckedChangeListener { _, isChecked -> 
             prefs.edit().putBoolean("app_eqs_context_enabled", isChecked).apply()
             val state = if (isChecked) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
@@ -203,6 +240,41 @@ class MainActivity : AppCompatActivity() {
             sendUpdateIntent()
         }
 
+        // --- Swipe Gesture Settings ---
+        val actionEntries = GestureManager.ACTION_LABELS.entries.toList()
+        val actionLabels = actionEntries.map { it.value }
+        val actionKeys = actionEntries.map { it.key }
+
+        fun setupSwipeSpinner(spinnerId: Int, prefKey: String, defaultAction: String) {
+            val spinner = findViewById<Spinner>(spinnerId)
+            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, actionLabels)
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            spinner.adapter = adapter
+
+            val currentAction = prefs.getString(prefKey, defaultAction) ?: defaultAction
+            val index = actionKeys.indexOf(currentAction)
+            if (index >= 0) spinner.setSelection(index)
+
+            // Use tag to skip initial onItemSelected trigger
+            spinner.tag = "init"
+            spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) {
+                    if (spinner.tag == "init") { spinner.tag = null; return }
+                    prefs.edit().putString(prefKey, actionKeys[pos]).apply()
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
+        }
+
+        setupSwipeSpinner(R.id.spinnerSwipeUp, "swipe_up_action", "show_volume")
+        setupSwipeSpinner(R.id.spinnerSwipeDown, "swipe_down_action", "toggle_mute")
+        setupSwipeSpinner(R.id.spinnerSwipeLeft, "swipe_left_action", "show_notifications")
+        setupSwipeSpinner(R.id.spinnerSwipeRight, "swipe_right_action", "media_play_pause")
+
+        findViewById<Button>(R.id.btnGestureRecord).setOnClickListener {
+            startActivity(Intent(this, GestureRecordActivity::class.java))
+        }
+
         // --- Color Setup ---
         val colorGroup = findViewById<RadioGroup>(R.id.colorGroup)
         
@@ -212,7 +284,14 @@ class MainActivity : AppCompatActivity() {
             android.graphics.Color.parseColor("#2196F3") to R.id.colorBlue,
             android.graphics.Color.parseColor("#F44336") to R.id.colorRed,
             android.graphics.Color.parseColor("#4CAF50") to R.id.colorGreen,
-            android.graphics.Color.parseColor("#000000") to R.id.colorBlack
+            android.graphics.Color.parseColor("#000000") to R.id.colorBlack,
+            android.graphics.Color.parseColor("#FFFFFF") to R.id.colorWhite,
+            android.graphics.Color.parseColor("#C0C0C0") to R.id.colorSilver,
+            android.graphics.Color.parseColor("#FFD700") to R.id.colorGold,
+            android.graphics.Color.parseColor("#FF9800") to R.id.colorOrange,
+            android.graphics.Color.parseColor("#E91E63") to R.id.colorPink,
+            android.graphics.Color.parseColor("#00BCD4") to R.id.colorCyan,
+            android.graphics.Color.parseColor("#FFEB3B") to R.id.colorYellow
         )
         
         val idToColorMap = colorMap.entries.associate { (k, v) -> v to k }
@@ -273,13 +352,11 @@ class MainActivity : AppCompatActivity() {
                     .putString("llama_system_prompt", prompt)
                     .putString("custom_vocabulary", vocab)
                     .putBoolean("clipboard_history_enabled", findViewById<CheckBox>(R.id.clipboardHistoryEnabledCheckBox).isChecked)
-                    .putBoolean("app_translate_enabled", findViewById<CheckBox>(R.id.appTranslateCheckBox).isChecked)
-                    .putBoolean("app_clipboard_enabled", findViewById<CheckBox>(R.id.appClipboardCheckBox).isChecked)
-                    .putBoolean("app_market_enabled", findViewById<CheckBox>(R.id.appMarketCheckBox).isChecked)
-                    .putBoolean("app_askllama_enabled", findViewById<CheckBox>(R.id.appAskLlamaCheckBox).isChecked)
                     .putBoolean("app_eqs_context_enabled", findViewById<CheckBox>(R.id.appEqsContextCheckBox).isChecked)
                     .putString("market_data_keys", prefs.getString("market_data_keys", "US500FU, USTECFU, DE40FU"))
                     .putInt("market_data_interval", marketInterval)
+                    .putInt("market_min_values", findViewById<android.widget.Spinner>(R.id.marketMinValuesSpinner).selectedItemPosition + 1)
+                    .putBoolean("market_notification_enabled", findViewById<CheckBox>(R.id.marketNotificationCheckBox).isChecked)
                     .apply()
 
                 val savedKey = prefs.getString("groq_api_key", null)
@@ -316,6 +393,14 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.btnRestoreBackup).setOnClickListener {
             showRestoreBackupDialog()
+        }
+
+        findViewById<Button>(R.id.btnExportSettings).setOnClickListener {
+            exportSettingsLauncher.launch("voicelistener_settings.json")
+        }
+
+        findViewById<Button>(R.id.btnImportSettings).setOnClickListener {
+            importSettingsLauncher.launch(arrayOf("application/json", "*/*"))
         }
 
         val refreshBtn = findViewById<Button>(R.id.refreshLogs)
@@ -362,7 +447,26 @@ class MainActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
         })
-        
+
+        // --- Dim Background Setup ---
+        val dimSlider = findViewById<android.widget.SeekBar>(R.id.dimSlider)
+        val dimLabel = findViewById<android.widget.TextView>(R.id.dimLabel)
+
+        val savedDim = prefs.getFloat("overlay_dim", 0.0f)
+        val dimProgress = (savedDim * 100).toInt()
+        dimSlider.progress = dimProgress
+        dimLabel.text = "Hintergrund abdunkeln: ${dimProgress}%"
+
+        dimSlider.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                val dim = progress / 100f
+                dimLabel.text = "Hintergrund abdunkeln: ${progress}%"
+                prefs.edit().putFloat("overlay_dim", dim).apply()
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+        })
+
         // --- Logs Setup ---
         val logsCheck = findViewById<CheckBox>(R.id.logsEnabledCheckBox)
         logsCheck.isChecked = prefs.getBoolean("logs_enabled", false)
@@ -450,6 +554,19 @@ class MainActivity : AppCompatActivity() {
         // Refresh Hidden Mode
         findViewById<CheckBox>(R.id.alwaysHiddenCheckBox).isChecked = prefs.getBoolean("overlay_always_hidden", false)
 
+        // Refresh Swipe Spinners
+        val actionKeys = GestureManager.ACTION_LABELS.keys.toList()
+        fun refreshSpinner(spinnerId: Int, prefKey: String, defaultAction: String) {
+            val spinner = findViewById<Spinner>(spinnerId)
+            val current = prefs.getString(prefKey, defaultAction) ?: defaultAction
+            val idx = actionKeys.indexOf(current)
+            if (idx >= 0) { spinner.tag = "init"; spinner.setSelection(idx) }
+        }
+        refreshSpinner(R.id.spinnerSwipeUp, "swipe_up_action", "show_volume")
+        refreshSpinner(R.id.spinnerSwipeDown, "swipe_down_action", "toggle_mute")
+        refreshSpinner(R.id.spinnerSwipeLeft, "swipe_left_action", "show_notifications")
+        refreshSpinner(R.id.spinnerSwipeRight, "swipe_right_action", "media_play_pause")
+
         // Refresh Clipboard
         findViewById<CheckBox>(R.id.clipboardHistoryEnabledCheckBox).isChecked = prefs.getBoolean("clipboard_history_enabled", true)
         
@@ -457,10 +574,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<CheckBox>(R.id.llamaEnabledCheckBox).isChecked = prefs.getBoolean("llama_enabled", true)
 
         // Refresh Extra Apps
-        findViewById<CheckBox>(R.id.appTranslateCheckBox).isChecked = prefs.getBoolean("app_translate_enabled", true)
-        findViewById<CheckBox>(R.id.appClipboardCheckBox).isChecked = prefs.getBoolean("app_clipboard_enabled", true)
-        findViewById<CheckBox>(R.id.appMarketCheckBox).isChecked = prefs.getBoolean("app_market_enabled", false)
-        findViewById<CheckBox>(R.id.appAskLlamaCheckBox).isChecked = prefs.getBoolean("app_askllama_enabled", true)
+        setupRadialMenuConfig(prefs)
         findViewById<CheckBox>(R.id.appEqsContextCheckBox).isChecked = prefs.getBoolean("app_eqs_context_enabled", true)
         updateMarketKeysDisplay(findViewById(R.id.marketKeysDisplay), prefs)
         findViewById<EditText>(R.id.marketIntervalInput).setText(prefs.getInt("market_data_interval", 1).toString())
@@ -545,6 +659,108 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupRadialMenuConfig(prefs: android.content.SharedPreferences) {
+        val container = findViewById<android.widget.LinearLayout>(R.id.radialMenuContainer)
+        container.removeAllViews()
+
+        val allItems = com.example.voicelistener.services.OverlayService.ALL_RADIAL_ITEMS
+
+        // Load saved config (ordered list of enabled IDs)
+        val configJson = prefs.getString("radial_menu_config", null)
+        val savedOrder: MutableList<String> = if (configJson != null) {
+            try {
+                val arr = org.json.JSONArray(configJson)
+                (0 until arr.length()).map { arr.getString(it) }.toMutableList()
+            } catch (_: Exception) { allItems.map { it.id }.toMutableList() }
+        } else {
+            allItems.map { it.id }.toMutableList()
+        }
+
+        // Build ordered list: saved items first, then any new items not in saved config
+        val allIds = allItems.map { it.id }
+        val orderedIds = mutableListOf<String>()
+        for (id in savedOrder) { if (id in allIds) orderedIds.add(id) }
+        for (id in allIds) { if (id !in orderedIds) orderedIds.add(id) }
+
+        // Track which are enabled
+        val enabledSet = savedOrder.toMutableSet()
+
+        // Map id -> def
+        val defMap = allItems.associateBy { it.id }
+
+        fun saveConfig() {
+            val enabled = orderedIds.filter { it in enabledSet }
+            val json = org.json.JSONArray(enabled)
+            prefs.edit().putString("radial_menu_config", json.toString()).apply()
+        }
+
+        fun rebuildList() {
+            container.removeAllViews()
+            val density = resources.displayMetrics.density
+            for ((index, id) in orderedIds.withIndex()) {
+                val def = defMap[id] ?: continue
+                val row = android.widget.LinearLayout(this).apply {
+                    orientation = android.widget.LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(0, (2 * density).toInt(), 0, (2 * density).toInt())
+                }
+
+                val cb = CheckBox(this).apply {
+                    text = "${def.icon}  ${def.label}"
+                    isChecked = id in enabledSet
+                    layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    setOnCheckedChangeListener { _, checked ->
+                        if (checked) enabledSet.add(id) else enabledSet.remove(id)
+                        saveConfig()
+                    }
+                }
+                row.addView(cb)
+
+                // Up button
+                if (index > 0) {
+                    val upBtn = android.widget.TextView(this).apply {
+                        text = "\u25B2"
+                        textSize = 16f
+                        setPadding((12 * density).toInt(), 0, (4 * density).toInt(), 0)
+                        setOnClickListener {
+                            val pos = orderedIds.indexOf(id)
+                            if (pos > 0) {
+                                orderedIds.removeAt(pos)
+                                orderedIds.add(pos - 1, id)
+                                saveConfig()
+                                rebuildList()
+                            }
+                        }
+                    }
+                    row.addView(upBtn)
+                }
+
+                // Down button
+                if (index < orderedIds.size - 1) {
+                    val downBtn = android.widget.TextView(this).apply {
+                        text = "\u25BC"
+                        textSize = 16f
+                        setPadding((4 * density).toInt(), 0, (8 * density).toInt(), 0)
+                        setOnClickListener {
+                            val pos = orderedIds.indexOf(id)
+                            if (pos < orderedIds.size - 1) {
+                                orderedIds.removeAt(pos)
+                                orderedIds.add(pos + 1, id)
+                                saveConfig()
+                                rebuildList()
+                            }
+                        }
+                    }
+                    row.addView(downBtn)
+                }
+
+                container.addView(row)
+            }
+        }
+
+        rebuildList()
+    }
+
     private fun updateMarketKeysDisplay(display: TextView, prefs: android.content.SharedPreferences) {
         val selectedKeys = prefs.getString("market_data_keys", "US500FU, USTECFU, DE40FU") ?: ""
         val keys = selectedKeys.split(",").map { it.trim() }.filter { it.isNotEmpty() }
@@ -621,6 +837,7 @@ class MainActivity : AppCompatActivity() {
             val rule = rules.optJSONObject(i) ?: continue
             val trigger = rule.optString("trigger", "")
             val replacement = rule.optString("replacement", "")
+            val caseSensitive = rule.optBoolean("case_sensitive", false)
 
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -634,6 +851,22 @@ class MainActivity : AppCompatActivity() {
                 textSize = 13f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
+            val idx = i
+            val caseCb = CheckBox(this).apply {
+                text = "Aa"
+                textSize = 11f
+                isChecked = caseSensitive
+                minWidth = 0
+                minimumWidth = 0
+                minHeight = 0
+                minimumHeight = 0
+                setPadding(8, 0, 8, 0)
+                setOnCheckedChangeListener { _, checked ->
+                    rule.put("case_sensitive", checked)
+                    prefs.edit().putString("text_expansion_rules", rules.toString()).apply()
+                    exportExpansionRules()
+                }
+            }
             val deleteBtn = Button(this).apply {
                 text = "✕"
                 textSize = 12f
@@ -642,7 +875,6 @@ class MainActivity : AppCompatActivity() {
                 minHeight = 0
                 minimumHeight = 0
                 setPadding(16, 4, 16, 4)
-                val idx = i
                 setOnClickListener {
                     rules.remove(idx)
                     prefs.edit().putString("text_expansion_rules", rules.toString()).apply()
@@ -650,12 +882,11 @@ class MainActivity : AppCompatActivity() {
                     exportExpansionRules()
                 }
             }
-            // Click on row to edit
-            val idx = i
             row.setOnClickListener {
-                showEditExpansionRuleDialog(idx, trigger, replacement)
+                showEditExpansionRuleDialog(idx, trigger, replacement, caseSensitive)
             }
             row.addView(label)
+            row.addView(caseCb)
             row.addView(deleteBtn)
             container.addView(row)
         }
@@ -684,8 +915,13 @@ class MainActivity : AppCompatActivity() {
         }
         val triggerInput = EditText(this).apply { hint = "Kürzel (z.B. Ää)" }
         val replacementInput = EditText(this).apply { hint = "Ersetzung (z.B. /)" }
+        val caseCb = CheckBox(this).apply {
+            text = "Groß-/Kleinschreibung beachten"
+            isChecked = false
+        }
         layout.addView(triggerInput)
         layout.addView(replacementInput)
+        layout.addView(caseCb)
 
         android.app.AlertDialog.Builder(this)
             .setTitle("Textersetzung hinzufügen")
@@ -694,7 +930,7 @@ class MainActivity : AppCompatActivity() {
                 val trigger = triggerInput.text.toString()
                 val replacement = replacementInput.text.toString()
                 if (trigger.isNotEmpty() && replacement.isNotEmpty()) {
-                    saveExpansionRule(trigger, replacement)
+                    saveExpansionRule(trigger, replacement, caseCb.isChecked)
                 }
             }
             .setNegativeButton("Abbrechen", null)
@@ -722,8 +958,13 @@ class MainActivity : AppCompatActivity() {
                     setPadding(0, 0, 0, 16)
                 }
                 val triggerInput = EditText(this).apply { hint = "Kürzel (z.B. .d für Datum)" }
+                val caseCb = CheckBox(this).apply {
+                    text = "Groß-/Kleinschreibung beachten"
+                    isChecked = false
+                }
                 layout.addView(info)
                 layout.addView(triggerInput)
+                layout.addView(caseCb)
 
                 android.app.AlertDialog.Builder(this)
                     .setTitle("Trigger eingeben")
@@ -731,7 +972,7 @@ class MainActivity : AppCompatActivity() {
                     .setPositiveButton("Hinzufügen") { _, _ ->
                         val trigger = triggerInput.text.toString()
                         if (trigger.isNotEmpty()) {
-                            saveExpansionRule(trigger, selectedToken)
+                            saveExpansionRule(trigger, selectedToken, caseCb.isChecked)
                         }
                     }
                     .setNegativeButton("Abbrechen", null)
@@ -741,23 +982,25 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun saveExpansionRule(trigger: String, replacement: String) {
+    private fun saveExpansionRule(trigger: String, replacement: String, caseSensitive: Boolean = false) {
         val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
         val rulesJson = prefs.getString("text_expansion_rules", "[]") ?: "[]"
         val rules = try { org.json.JSONArray(rulesJson) } catch (e: Exception) { org.json.JSONArray() }
-        val newRule = org.json.JSONObject().put("trigger", trigger).put("replacement", replacement)
+        val newRule = org.json.JSONObject()
+            .put("trigger", trigger)
+            .put("replacement", replacement)
+            .put("case_sensitive", caseSensitive)
         rules.put(newRule)
         prefs.edit().putString("text_expansion_rules", rules.toString()).apply()
         refreshExpansionRules()
         exportExpansionRules()
     }
 
-    private fun showEditExpansionRuleDialog(index: Int, currentTrigger: String, currentReplacement: String) {
+    private fun showEditExpansionRuleDialog(index: Int, currentTrigger: String, currentReplacement: String, currentCaseSensitive: Boolean = false) {
         val funcMap = com.example.voicelistener.services.VoiceAccessibilityService.FUNCTION_REPLACEMENTS
         val isFunction = funcMap.containsKey(currentReplacement)
 
         if (isFunction) {
-            // Edit function rule: let user pick a new function and/or change trigger
             val functions = com.example.voicelistener.services.VoiceAccessibilityService.FUNCTION_REPLACEMENTS
             val tokens = functions.keys.toList()
             val labels = functions.values.toTypedArray()
@@ -782,8 +1025,13 @@ class MainActivity : AppCompatActivity() {
                         hint = "Kürzel"
                         setText(currentTrigger)
                     }
+                    val caseCb = CheckBox(this).apply {
+                        text = "Groß-/Kleinschreibung beachten"
+                        isChecked = currentCaseSensitive
+                    }
                     layout.addView(info)
                     layout.addView(triggerInput)
+                    layout.addView(caseCb)
 
                     android.app.AlertDialog.Builder(this)
                         .setTitle("Trigger bearbeiten")
@@ -791,7 +1039,7 @@ class MainActivity : AppCompatActivity() {
                         .setPositiveButton("Speichern") { _, _ ->
                             val trigger = triggerInput.text.toString()
                             if (trigger.isNotEmpty()) {
-                                updateExpansionRule(index, trigger, selectedToken)
+                                updateExpansionRule(index, trigger, selectedToken, caseCb.isChecked)
                             }
                         }
                         .setNegativeButton("Abbrechen", null)
@@ -800,7 +1048,6 @@ class MainActivity : AppCompatActivity() {
                 .setNegativeButton("Abbrechen", null)
                 .show()
         } else {
-            // Edit text rule
             val layout = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(48, 32, 48, 16)
@@ -813,8 +1060,13 @@ class MainActivity : AppCompatActivity() {
                 hint = "Ersetzung"
                 setText(currentReplacement)
             }
+            val caseCb = CheckBox(this).apply {
+                text = "Groß-/Kleinschreibung beachten"
+                isChecked = currentCaseSensitive
+            }
             layout.addView(triggerInput)
             layout.addView(replacementInput)
+            layout.addView(caseCb)
 
             android.app.AlertDialog.Builder(this)
                 .setTitle("Textersetzung bearbeiten")
@@ -823,7 +1075,7 @@ class MainActivity : AppCompatActivity() {
                     val trigger = triggerInput.text.toString()
                     val replacement = replacementInput.text.toString()
                     if (trigger.isNotEmpty() && replacement.isNotEmpty()) {
-                        updateExpansionRule(index, trigger, replacement)
+                        updateExpansionRule(index, trigger, replacement, caseCb.isChecked)
                     }
                 }
                 .setNegativeButton("Abbrechen", null)
@@ -831,12 +1083,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateExpansionRule(index: Int, trigger: String, replacement: String) {
+    private fun updateExpansionRule(index: Int, trigger: String, replacement: String, caseSensitive: Boolean = false) {
         val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
         val rulesJson = prefs.getString("text_expansion_rules", "[]") ?: "[]"
         val rules = try { org.json.JSONArray(rulesJson) } catch (e: Exception) { org.json.JSONArray() }
         if (index < rules.length()) {
-            val updatedRule = org.json.JSONObject().put("trigger", trigger).put("replacement", replacement)
+            val updatedRule = org.json.JSONObject()
+                .put("trigger", trigger)
+                .put("replacement", replacement)
+                .put("case_sensitive", caseSensitive)
             rules.put(index, updatedRule)
             prefs.edit().putString("text_expansion_rules", rules.toString()).apply()
             refreshExpansionRules()
@@ -956,6 +1211,53 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Schließen", null)
             .show()
+    }
+
+    private fun writeExportToUri(uri: Uri) {
+        try {
+            val json = SettingsBackup.exportToJson(this)
+            contentResolver.openOutputStream(uri)?.use { stream ->
+                stream.write(json.toByteArray(Charsets.UTF_8))
+            }
+            Toast.makeText(this, "Einstellungen exportiert", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Export fehlgeschlagen: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun readImportFromUri(uri: Uri) {
+        try {
+            val json = contentResolver.openInputStream(uri)?.use { stream ->
+                stream.bufferedReader(Charsets.UTF_8).readText()
+            } ?: return
+
+            val (valid, preview) = SettingsBackup.getImportPreview(json)
+            if (!valid) {
+                Toast.makeText(this, preview, Toast.LENGTH_LONG).show()
+                return
+            }
+
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Einstellungen importieren?")
+                .setMessage(preview)
+                .setPositiveButton("Importieren") { _, _ ->
+                    val (success, message) = SettingsBackup.importFromJson(this, json)
+                    Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+                    if (success) {
+                        refreshSettingsUI()
+                        val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+                        findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.promptInput)
+                            ?.setText(prefs.getString("llama_system_prompt", ""))
+                        findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.vocabularyInput)
+                            ?.setText(prefs.getString("custom_vocabulary", ""))
+                        sendUpdateIntent()
+                    }
+                }
+                .setNegativeButton("Abbrechen", null)
+                .show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Import fehlgeschlagen: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // Inner adapter class for market key selection with drag & drop

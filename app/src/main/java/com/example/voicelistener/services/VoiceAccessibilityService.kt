@@ -33,7 +33,6 @@ class VoiceAccessibilityService : AccessibilityService() {
     }
     
     private var lastFocusState: Boolean? = null
-    
     // Shared History Trigger
     val currentHistory: List<String>
         get() = clipboardHistory.toList()
@@ -118,6 +117,36 @@ class VoiceAccessibilityService : AccessibilityService() {
             val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.removePrimaryClipChangedListener(clipboardListener)
         }
+    }
+
+    fun getCurrentInputText(): String? {
+        val root = rootInActiveWindow ?: return null
+        var focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (focused == null || !isEditableNode(focused)) {
+            focused = findFocusedEditable(root)
+        }
+        if (focused == null) return null
+        return focused.text?.toString()
+    }
+
+    fun replaceCurrentInputText(newText: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        var focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (focused == null || !isEditableNode(focused)) {
+            focused = findFocusedEditable(root)
+        }
+        if (focused == null) return false
+        val args = Bundle()
+        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
+        val success = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        if (success) {
+            // Move cursor to end
+            val cursorArgs = Bundle()
+            cursorArgs.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, newText.length)
+            cursorArgs.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, newText.length)
+            focused.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, cursorArgs)
+        }
+        return success
     }
 
     fun isInputFocused(): Boolean {
@@ -359,13 +388,18 @@ class VoiceAccessibilityService : AccessibilityService() {
         if (rules.isEmpty()) return
 
         // Collect all matching rules for the current text
-        val matches = mutableListOf<Pair<String, String>>() // trigger, replacement
+        val matches = mutableListOf<Triple<String, String, Boolean>>() // trigger, replacement, caseSensitive
         for (rule in rules) {
-            val trigger = rule.first
-            val replacement = rule.second
-            if (trigger.isEmpty()) continue
-            if (text.endsWith(trigger)) {
-                matches.add(trigger to replacement)
+            if (rule.trigger.isEmpty()) continue
+            val isMatch = if (rule.caseSensitive) {
+                text.endsWith(rule.trigger)
+            } else {
+                text.lowercase().endsWith(rule.trigger.lowercase())
+            }
+            if (isMatch) {
+                // Use the actual trigger text from the input (preserving case) for replacement
+                val actualTrigger = text.substring(text.length - rule.trigger.length)
+                matches.add(Triple(actualTrigger, rule.replacement, rule.caseSensitive))
             }
         }
 
@@ -374,11 +408,10 @@ class VoiceAccessibilityService : AccessibilityService() {
         val source = event.source ?: return
 
         if (matches.size == 1) {
-            // Single match: apply directly
             applyExpansion(source, text, matches[0].first, matches[0].second)
         } else {
-            // Multiple matches: show picker overlay
-            showExpansionPicker(source, text, matches)
+            val pairMatches = matches.map { it.first to it.second }
+            showExpansionPicker(source, text, pairMatches)
         }
     }
 
@@ -515,6 +548,16 @@ class VoiceAccessibilityService : AccessibilityService() {
                     } else false
                 }
 
+                // Back button dismisses picker
+                params.flags = (params.flags and android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()) or
+                    android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                container.isFocusableInTouchMode = true
+                container.setOnKeyListener { _, keyCode, event ->
+                    if (keyCode == android.view.KeyEvent.KEYCODE_BACK && event.action == android.view.KeyEvent.ACTION_UP) {
+                        dismissExpansionPicker()
+                        true
+                    } else false
+                }
                 wm.addView(container, params)
                 pickerView = container
 
@@ -536,15 +579,21 @@ class VoiceAccessibilityService : AccessibilityService() {
         isExpanding = false
     }
 
-    private fun loadExpansionRules(): List<Pair<String, String>> {
+    data class ExpansionRule(val trigger: String, val replacement: String, val caseSensitive: Boolean)
+
+    private fun loadExpansionRules(): List<ExpansionRule> {
         val prefs = getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
         val json = prefs.getString("text_expansion_rules", "[]") ?: "[]"
-        val result = mutableListOf<Pair<String, String>>()
+        val result = mutableListOf<ExpansionRule>()
         try {
             val arr = org.json.JSONArray(json)
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
-                result.add(Pair(obj.getString("trigger"), obj.getString("replacement")))
+                result.add(ExpansionRule(
+                    obj.getString("trigger"),
+                    obj.getString("replacement"),
+                    obj.optBoolean("case_sensitive", false)
+                ))
             }
         } catch (_: Exception) {}
         return result

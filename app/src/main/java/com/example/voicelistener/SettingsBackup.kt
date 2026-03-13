@@ -22,7 +22,9 @@ object SettingsBackup {
         "app_translate_enabled", "app_clipboard_enabled",
         "app_market_enabled", "app_askllama_enabled", "app_eqs_context_enabled",
         "clipboard_history_enabled", "logs_enabled",
-        "market_data_keys", "market_data_interval"
+        "market_data_keys", "market_data_interval",
+        "gesture_actions",
+        "swipe_up_action", "swipe_down_action", "swipe_left_action", "swipe_right_action"
     )
 
     fun createBackup(context: Context, reason: String) {
@@ -68,6 +70,112 @@ object SettingsBackup {
         val backupPrefs = context.getSharedPreferences(BACKUP_PREFS, Context.MODE_PRIVATE)
         val json = backupPrefs.getString(BACKUP_KEY, "[]") ?: "[]"
         return try { JSONArray(json) } catch (_: Exception) { JSONArray() }
+    }
+
+    fun exportToJson(context: Context): String {
+        val appPrefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val snapshot = JSONObject()
+        val allEntries = appPrefs.all
+        for (key in BACKUP_KEYS) {
+            if (allEntries.containsKey(key)) {
+                val value = allEntries[key]
+                when (value) {
+                    is Boolean -> snapshot.put(key, value)
+                    is Float -> snapshot.put(key, value.toDouble())
+                    is Int -> snapshot.put(key, value)
+                    is String -> snapshot.put(key, value)
+                }
+            }
+        }
+
+        val export = JSONObject()
+        export.put("app", "VoiceListener")
+        export.put("format_version", 1)
+        val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+        export.put("exported_at", fmt.format(Date()))
+        export.put("settings", snapshot)
+        return export.toString(2)
+    }
+
+    fun importFromJson(context: Context, json: String): Pair<Boolean, String> {
+        val root: JSONObject
+        try {
+            root = JSONObject(json)
+        } catch (_: Exception) {
+            return Pair(false, "Ungültige JSON-Datei")
+        }
+
+        if (root.optString("app") != "VoiceListener") {
+            return Pair(false, "Keine VoiceListener-Exportdatei")
+        }
+
+        val settings = root.optJSONObject("settings")
+            ?: return Pair(false, "Keine Einstellungen in der Datei")
+
+        if (settings.length() == 0) {
+            return Pair(false, "Keine Einstellungen in der Datei")
+        }
+
+        // Create backup before importing
+        createBackup(context, "Vor Import")
+
+        val appPrefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val editor = appPrefs.edit()
+        var count = 0
+
+        val keys = settings.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val value = settings.get(key)
+            when (value) {
+                is Boolean -> { editor.putBoolean(key, value); count++ }
+                is Double -> { editor.putFloat(key, value.toFloat()); count++ }
+                is Int -> { editor.putInt(key, value); count++ }
+                is String -> { editor.putString(key, value); count++ }
+            }
+        }
+
+        editor.apply()
+        return Pair(true, "$count Einstellungen importiert")
+    }
+
+    fun getImportPreview(json: String): Pair<Boolean, String> {
+        val root: JSONObject
+        try {
+            root = JSONObject(json)
+        } catch (_: Exception) {
+            return Pair(false, "Ungültige JSON-Datei")
+        }
+
+        if (root.optString("app") != "VoiceListener") {
+            return Pair(false, "Keine VoiceListener-Exportdatei")
+        }
+
+        val settings = root.optJSONObject("settings")
+            ?: return Pair(false, "Keine Einstellungen in der Datei")
+
+        val formatVersion = root.optInt("format_version", 1)
+        val exportedAt = root.optString("exported_at", "unbekannt")
+
+        val sb = StringBuilder()
+        sb.append("Exportiert: $exportedAt\n")
+        if (formatVersion > 1) {
+            sb.append("Hinweis: Neueres Format (v$formatVersion) - Best-Effort Import\n")
+        }
+        sb.append("${settings.length()} Einstellungen:\n\n")
+
+        val keys = settings.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val value = settings.get(key)
+            val displayValue = when {
+                value is String && value.length > 50 -> value.take(50) + "..."
+                else -> value.toString()
+            }
+            sb.append("• $key = $displayValue\n")
+        }
+
+        return Pair(true, sb.toString())
     }
 
     fun restoreBackup(context: Context, index: Int): Boolean {
