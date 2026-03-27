@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center"
+    android:layout_marginTop="16dp">
+
+    <Button
+        android:id="@+id/btnSaveAndStart"
+        android:layout_width="0dp"
+        android:layout_weight="1"
+        android:layout_height="wrap_content"
+        android:text="Save &amp; Start"
+        android:backgroundTint="#4CAF50"
+        android:textColor="#FFFFFF"/>
+
+    <Space
+        android:layout_width="8dp"
+        android:layout_height="wrap_content"/>
+
+    <Button
+        android:id="@+id/btnSaveOnly"
+        android:layout_width="0dp"
+        android:layout_weight="1"
+        android:layout_height="wrap_content"
+        android:text="Nur Speichern"
+        android:backgroundTint="#FF5C6BC0"
+        android:textColor="#FFFFFF"/>
+
+</LinearLayout>

@@ -48,6 +48,14 @@ import okhttp3.Request
 import org.json.JSONObject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
+import android.util.Base64
+import org.json.JSONArray
+import com.example.voicelistener.VoiceChatWidget
 
 class OverlayService : Service() {
     
@@ -84,9 +92,201 @@ Output:
             RadialItemDef("timeout", "\u23F1", "Timeout", "#FF5722"),
             RadialItemDef("settings", "\u2699", "Settings", "#6200EE"),
         )
+
+        /** Returns all radial items including dynamically added Tasker tasks and custom items */
+        fun getAllRadialItems(context: android.content.Context): List<RadialItemDef> {
+            val items = ALL_RADIAL_ITEMS.toMutableList()
+            // Add Tasker tasks
+            val taskerTasks = com.example.voicelistener.TaskerHelper.getTasks(context)
+            for (task in taskerTasks) {
+                val actionId = com.example.voicelistener.TaskerHelper.actionIdForTask(task)
+                items.add(RadialItemDef(actionId, "\u26A1", "T: ${task.name}", "#9C27B0"))
+            }
+            // Add custom items
+            items.addAll(getCustomRadialItems(context))
+            // Add groups as items (they appear in the main radial menu)
+            for (group in getRadialGroups(context)) {
+                items.add(RadialItemDef(group.id, group.icon, group.label, group.color))
+            }
+            return items
+        }
+
+        private const val CUSTOM_ITEMS_KEY = "custom_radial_items"
+
+        fun getCustomRadialItems(context: android.content.Context): List<RadialItemDef> {
+            val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+            val json = prefs.getString(CUSTOM_ITEMS_KEY, "[]") ?: "[]"
+            return try {
+                val arr = org.json.JSONArray(json)
+                (0 until arr.length()).map { i ->
+                    val obj = arr.getJSONObject(i)
+                    RadialItemDef(
+                        id = obj.getString("id"),
+                        icon = obj.optString("icon", "\u2B50"),
+                        label = obj.getString("label"),
+                        defaultColor = obj.optString("color", "#FF9800")
+                    )
+                }
+            } catch (_: Exception) { emptyList() }
+        }
+
+        /** Get the source action ID for a custom radial item */
+        fun getCustomItemAction(context: android.content.Context, customId: String): String? {
+            val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+            val json = prefs.getString(CUSTOM_ITEMS_KEY, "[]") ?: "[]"
+            return try {
+                val arr = org.json.JSONArray(json)
+                (0 until arr.length()).firstNotNullOfOrNull { i ->
+                    val obj = arr.getJSONObject(i)
+                    if (obj.getString("id") == customId) obj.getString("actionId") else null
+                }
+            } catch (_: Exception) { null }
+        }
+
+        fun saveCustomItem(context: android.content.Context, id: String, label: String, actionId: String, icon: String, color: String) {
+            val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+            val json = prefs.getString(CUSTOM_ITEMS_KEY, "[]") ?: "[]"
+            val arr = try { org.json.JSONArray(json) } catch (_: Exception) { org.json.JSONArray() }
+            arr.put(org.json.JSONObject().apply {
+                put("id", id)
+                put("label", label)
+                put("actionId", actionId)
+                put("icon", icon)
+                put("color", color)
+            })
+            prefs.edit().putString(CUSTOM_ITEMS_KEY, arr.toString()).apply()
+        }
+
+        fun removeCustomItem(context: android.content.Context, customId: String) {
+            val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+            val json = prefs.getString(CUSTOM_ITEMS_KEY, "[]") ?: "[]"
+            val arr = try { org.json.JSONArray(json) } catch (_: Exception) { return }
+            val newArr = org.json.JSONArray()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                if (obj.getString("id") != customId) newArr.put(obj)
+            }
+            prefs.edit().putString(CUSTOM_ITEMS_KEY, newArr.toString()).apply()
+        }
+        // --- Radial Groups (Sub-Menus) ---
+        private const val GROUPS_KEY = "radial_groups"
+
+        data class RadialGroupDef(
+            val id: String,
+            val label: String,
+            val icon: String,
+            val color: String,
+            val iconType: String = "emoji", // "emoji", "text", or "gallery"
+            val iconUri: String? = null,
+            val children: List<String> // action IDs of child items
+        )
+
+        fun getRadialGroups(context: android.content.Context): List<RadialGroupDef> {
+            val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+            val json = prefs.getString(GROUPS_KEY, "[]") ?: "[]"
+            return try {
+                val arr = org.json.JSONArray(json)
+                (0 until arr.length()).map { i ->
+                    val obj = arr.getJSONObject(i)
+                    val childArr = obj.getJSONArray("children")
+                    val children = (0 until childArr.length()).map { c -> childArr.getString(c) }
+                    RadialGroupDef(
+                        id = obj.getString("id"),
+                        label = obj.getString("label"),
+                        icon = obj.optString("icon", "\uD83D\uDCC2"),
+                        color = obj.optString("color", "#9C27B0"),
+                        iconType = obj.optString("iconType", "emoji"),
+                        iconUri = if (obj.has("iconUri") && obj.getString("iconUri").isNotEmpty()) obj.getString("iconUri") else null,
+                        children = children
+                    )
+                }
+            } catch (_: Exception) { emptyList() }
+        }
+
+        fun saveRadialGroup(context: android.content.Context, group: RadialGroupDef) {
+            val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+            val json = prefs.getString(GROUPS_KEY, "[]") ?: "[]"
+            val arr = try { org.json.JSONArray(json) } catch (_: Exception) { org.json.JSONArray() }
+            // Remove existing with same id
+            val newArr = org.json.JSONArray()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                if (obj.getString("id") != group.id) newArr.put(obj)
+            }
+            newArr.put(org.json.JSONObject().apply {
+                put("id", group.id)
+                put("label", group.label)
+                put("icon", group.icon)
+                put("color", group.color)
+                put("iconType", group.iconType)
+                put("iconUri", group.iconUri ?: "")
+                put("children", org.json.JSONArray(group.children))
+            })
+            prefs.edit().putString(GROUPS_KEY, newArr.toString()).apply()
+        }
+
+        fun removeRadialGroup(context: android.content.Context, groupId: String) {
+            val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+            val json = prefs.getString(GROUPS_KEY, "[]") ?: "[]"
+            val arr = try { org.json.JSONArray(json) } catch (_: Exception) { return }
+            val newArr = org.json.JSONArray()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                if (obj.getString("id") != groupId) newArr.put(obj)
+            }
+            prefs.edit().putString(GROUPS_KEY, newArr.toString()).apply()
+        }
+
+        // --- Per-item icon/color overrides ---
+        private const val ITEM_APPEARANCE_KEY = "item_appearance_overrides"
+
+        fun getItemAppearance(context: android.content.Context, itemId: String): ItemAppearance? {
+            val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+            val json = prefs.getString(ITEM_APPEARANCE_KEY, "{}") ?: "{}"
+            return try {
+                val obj = org.json.JSONObject(json)
+                if (obj.has(itemId)) {
+                    val item = obj.getJSONObject(itemId)
+                    ItemAppearance(
+                        iconType = item.optString("iconType", "emoji"),
+                        icon = if (item.has("icon")) item.getString("icon") else null,
+                        iconUri = if (item.has("iconUri") && item.getString("iconUri").isNotEmpty()) item.getString("iconUri") else null,
+                        color = if (item.has("color")) item.getString("color") else null
+                    )
+                } else null
+            } catch (_: Exception) { null }
+        }
+
+        fun saveItemAppearance(context: android.content.Context, itemId: String, appearance: ItemAppearance) {
+            val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+            val json = prefs.getString(ITEM_APPEARANCE_KEY, "{}") ?: "{}"
+            val obj = try { org.json.JSONObject(json) } catch (_: Exception) { org.json.JSONObject() }
+            obj.put(itemId, org.json.JSONObject().apply {
+                put("iconType", appearance.iconType)
+                put("icon", appearance.icon ?: "")
+                put("iconUri", appearance.iconUri ?: "")
+                if (appearance.color != null) put("color", appearance.color)
+            })
+            prefs.edit().putString(ITEM_APPEARANCE_KEY, obj.toString()).apply()
+        }
+
+        fun removeItemAppearance(context: android.content.Context, itemId: String) {
+            val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+            val json = prefs.getString(ITEM_APPEARANCE_KEY, "{}") ?: "{}"
+            val obj = try { org.json.JSONObject(json) } catch (_: Exception) { return }
+            obj.remove(itemId)
+            prefs.edit().putString(ITEM_APPEARANCE_KEY, obj.toString()).apply()
+        }
     }
 
     data class RadialItemDef(val id: String, val icon: String, val label: String, val defaultColor: String)
+
+    data class ItemAppearance(
+        val iconType: String = "emoji", // "emoji", "text", or "gallery"
+        val icon: String? = null,
+        val iconUri: String? = null,
+        val color: String? = null
+    )
 
     private val PRIMARY_MODEL get() = getSharedPreferences("app_prefs", MODE_PRIVATE)
         .getString("llm_model", "llama-3.3-70b-versatile") ?: "llama-3.3-70b-versatile"
@@ -105,10 +305,38 @@ Output:
         })
     }
 
+    private fun isGeminiModel(model: String): Boolean = model.startsWith("gemini")
+    private fun useGoogleSearch(model: String): Boolean = model.contains("+ Search")
+    private fun geminiModelId(model: String): String = when {
+        model.contains("2.5-flash") -> "gemini-2.5-flash"
+        model.contains("2.5-pro") -> "gemini-2.5-pro"
+        else -> "gemini-2.5-flash"
+    }
+
     private suspend fun chatWithFallback(auth: String, messages: List<Message>, temperature: Double = 0.0): com.example.voicelistener.network.ChatResponse {
         val primary = PRIMARY_MODEL
+
+        // Route to Gemini if selected
+        if (isGeminiModel(primary)) {
+            val geminiKey = getSharedPreferences("app_prefs", MODE_PRIVATE)
+                .getString("gemini_api_key", "") ?: ""
+            if (geminiKey.isNotEmpty()) {
+                val result = chatWithGemini(geminiKey, messages, geminiModelId(primary), useGoogleSearch(primary))
+                // Wrap in ChatResponse format for compatibility
+                return com.example.voicelistener.network.ChatResponse(
+                    choices = listOf(com.example.voicelistener.network.Choice(
+                        message = Message("assistant", result)
+                    ))
+                )
+            } else {
+                FileLogger.log(this, "LLM", "Gemini selected but no API key, falling back to Groq")
+                withContext(Dispatchers.Main) { showTopMessage("Gemini Key fehlt — Groq Fallback") }
+            }
+        }
+
+        // Groq path
         val raw = try {
-            val request = ChatRequest(model = primary, messages = messages, temperature = temperature)
+            val request = ChatRequest(model = primary.replace(" + Search", ""), messages = messages, temperature = temperature)
             GroqClient.api.chatCompletion(auth, request)
         } catch (e: retrofit2.HttpException) {
             if (e.code() == 429) {
@@ -120,6 +348,84 @@ Output:
             } else throw e
         }
         return stripThinkingFromResponse(raw)
+    }
+
+    private suspend fun chatWithGemini(apiKey: String, messages: List<Message>, model: String, withSearch: Boolean): String {
+        return withContext(Dispatchers.IO) {
+            // Build Gemini contents from messages
+            val contents = JSONArray()
+            for (msg in messages) {
+                val role = if (msg.role == "assistant") "model" else msg.role
+                // Gemini uses "user" and "model" roles; system goes into systemInstruction
+                if (role == "system") continue
+                contents.put(JSONObject().apply {
+                    put("role", role)
+                    put("parts", JSONArray().put(JSONObject().apply {
+                        put("text", msg.content)
+                    }))
+                })
+            }
+
+            val requestBody = JSONObject().apply {
+                put("contents", contents)
+
+                // System instruction (if any)
+                val systemMsg = messages.firstOrNull { it.role == "system" }
+                if (systemMsg != null) {
+                    put("systemInstruction", JSONObject().apply {
+                        put("parts", JSONArray().put(JSONObject().apply {
+                            put("text", systemMsg.content)
+                        }))
+                    })
+                }
+
+                // Google Search tool
+                if (withSearch) {
+                    put("tools", JSONArray().put(JSONObject().apply {
+                        put("google_search", JSONObject())
+                    }))
+                }
+            }
+
+            FileLogger.log(this@OverlayService, "Gemini", "Calling $model (search=$withSearch)")
+
+            val request = Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey")
+                .post(requestBody.toString().toRequestBody("application/json".toMediaTypeOrNull()))
+                .build()
+
+            val client = OkHttpClient.Builder()
+                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+
+            if (!response.isSuccessful) {
+                FileLogger.log(this@OverlayService, "Gemini", "Error ${response.code}: ${body.take(200)}")
+                throw Exception("Gemini API error ${response.code}")
+            }
+
+            val json = JSONObject(body)
+            val parts = json.getJSONArray("candidates")
+                .getJSONObject(0)
+                .getJSONObject("content")
+                .getJSONArray("parts")
+
+            // Concatenate all text parts (Gemini may return multiple)
+            val result = StringBuilder()
+            for (i in 0 until parts.length()) {
+                val part = parts.getJSONObject(i)
+                if (part.has("text")) {
+                    result.append(part.getString("text"))
+                }
+            }
+
+            val text = stripThinkingBlock(result.toString())
+            FileLogger.log(this@OverlayService, "Gemini", "Response: ${text.take(100)}")
+            text
+        }
     }
 
     private lateinit var windowManager: WindowManager
@@ -134,6 +440,15 @@ Output:
     // Gesture recognition
     private val gestureManager by lazy { GestureManager(this) }
     private var savedVolumeBeforeMute: Int = -1
+
+    // TTS
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    private var audioTrack: AudioTrack? = null
+    private var isGeminiSpeaking = false
+
+    // Voice Chat Widget
+    private var isVoiceChatRecording = false
 
     // Visibility Logic
     private var isRecording = false
@@ -202,6 +517,10 @@ Output:
     override fun onDestroy() {
         super.onDestroy()
         FileLogger.log(this, "OverlayService", "Service destroying...")
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
+        stopGeminiAudio()
         try {
             unregisterReceiver(focusReceiver)
             unregisterReceiver(clipboardUpdateReceiver)
@@ -422,6 +741,24 @@ Output:
         val action = intent?.action
         FileLogger.log(this, "OverlayService", "onStartCommand called! Action=$action")
         
+        // Handle Voice Chat Widget toggle
+        if (action == "ACTION_VOICE_CHAT_TOGGLE") {
+            if (tts?.isSpeaking == true || isGeminiSpeaking) {
+                // Cancel TTS playback
+                tts?.stop()
+                stopGeminiAudio()
+                VoiceChatWidget.updateState(this, "idle")
+                FileLogger.log(this, "VoiceChat", "TTS cancelled by user")
+            } else if (isRecording) {
+                Toast.makeText(this, "Aufnahme laeuft bereits", Toast.LENGTH_SHORT).show()
+            } else if (isVoiceChatRecording) {
+                stopVoiceChatRecording()
+            } else {
+                startVoiceChatRecording()
+            }
+            return START_STICKY
+        }
+
         // Handle "Show Overlay" request
         if (action == "ACTION_SHOW_OVERLAY" || action == null || action == "ACTION_UPDATE_SETTINGS") {
              if (action == "ACTION_UPDATE_SETTINGS") FileLogger.log(this, "OverlayService", "Settings updated.")
@@ -919,12 +1256,24 @@ Output:
             "toggle_market_data" -> toggleMarketDataWidget()
             "toggle_ask_llama" -> { isAskLlamaActive = !isAskLlamaActive; showTopMessage(if (isAskLlamaActive) "AskLlama AN" else "AskLlama AUS") }
             "open_settings" -> {
-                val intent = Intent(this, com.example.voicelistener.MainActivity::class.java).apply {
+                val settingsIntent = Intent(this, com.example.voicelistener.MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 }
-                startActivity(intent)
+                startActivity(settingsIntent)
             }
-            else -> FileLogger.log(this, "Action", "Unknown action: $actionId")
+            else -> {
+                if (com.example.voicelistener.TaskerHelper.isTaskerAction(actionId)) {
+                    val task = com.example.voicelistener.TaskerHelper.getTaskForAction(this, actionId)
+                    if (task != null) {
+                        com.example.voicelistener.TaskerHelper.executeTask(this, task)
+                        showTopMessage("Tasker: ${task.name}")
+                    } else {
+                        FileLogger.log(this, "Action", "Tasker task not found: $actionId")
+                    }
+                } else {
+                    FileLogger.log(this, "Action", "Unknown action: $actionId")
+                }
+            }
         }
     }
 
@@ -1033,10 +1382,12 @@ Output:
                     (0 until arr.length()).map { arr.getString(it) }
                 } catch (_: Exception) { null }
             } else null
-            // Fallback: all items in default order
-            val orderedIds = enabledIds ?: ALL_RADIAL_ITEMS.map { it.id }
+            // Fallback: all items in default order (including Tasker tasks)
+            val allItems = getAllRadialItems(this@OverlayService)
+            val orderedIds = enabledIds ?: allItems.map { it.id }
+            val finalOrderedIds = orderedIds
 
-            val actionMap = mapOf<String, () -> RadialItem>(
+            val actionMap = mutableMapOf<String, () -> RadialItem>(
                 "translate_es" to { RadialItem("ES", "Spanisch", "#E91E63") {
                     closeMenu(); pendingTranslateLang = "Spanisch"; isAskLlamaActive = false; isSettingsAIActive = false
                     startRecording(); isRecording = true
@@ -1082,7 +1433,43 @@ Output:
                 }}
             )
 
-            val items = orderedIds.mapNotNull { id -> actionMap[id]?.invoke() }
+            // Dynamically add Tasker tasks to actionMap
+            val taskerTasks = com.example.voicelistener.TaskerHelper.getTasks(this@OverlayService)
+            for (tTask in taskerTasks) {
+                val actionId = com.example.voicelistener.TaskerHelper.actionIdForTask(tTask)
+                actionMap[actionId] = { RadialItem("\u26A1", "T: ${tTask.name}", "#9C27B0") {
+                    closeMenu()
+                    com.example.voicelistener.TaskerHelper.executeTask(this@OverlayService, tTask)
+                    showTopMessage("Tasker: ${tTask.name}")
+                }}
+            }
+
+            // Add custom items: delegate to their source action
+            val customItems = getCustomRadialItems(this@OverlayService)
+            for (cItem in customItems) {
+                val sourceActionId = getCustomItemAction(this@OverlayService, cItem.id)
+                if (sourceActionId != null && actionMap.containsKey(sourceActionId)) {
+                    val srcFactory = actionMap[sourceActionId]!!
+                    actionMap[cItem.id] = {
+                        val src = srcFactory()
+                        RadialItem(cItem.icon, cItem.label, cItem.defaultColor, src.action)
+                    }
+                }
+            }
+
+            // Load groups for sub-menu handling
+            val groups = getRadialGroups(this@OverlayService)
+            val groupMap = groups.associateBy { it.id }
+
+            // Add group actions to actionMap (before filtering, so groups appear in menu)
+            for (group in groups) {
+                actionMap[group.id] = { RadialItem(group.icon, group.label, group.color) {
+                    // Sub-menu opening handled per-button in rendering loop below
+                }}
+            }
+
+            val items = finalOrderedIds.mapNotNull { id -> actionMap[id]?.invoke() }
+            val itemIds = finalOrderedIds.filter { actionMap.containsKey(it) }
             if (items.isEmpty()) {
                 showTopMessage("Keine Menü-Items aktiviert")
                 return
@@ -1092,12 +1479,7 @@ Output:
             val minGap = (8 * density)  // minimum gap between button edges
             val minSpacing = btnSize + minGap  // minimum center-to-center distance
 
-            // Calculate radius so buttons don't overlap:
-            // Arc distance between adjacent buttons = radius * angleStep >= minSpacing
-            // For N items over a given angle range, angleStep = totalAngle / (N-1)
-            // So radius >= minSpacing / angleStep = minSpacing * (N-1) / totalAngle
-
-            // Determine max arc angle based on item count (allow up to 300° for many items)
+            // Calculate radius so buttons don't overlap
             val maxArcDeg = if (items.size <= 5) 180.0
                 else kotlin.math.min(180.0 + (items.size - 5) * 20.0, 300.0)
 
@@ -1107,14 +1489,14 @@ Output:
             } else 80f * density
 
             val radius = kotlin.math.max(minRadius, 80f * density)
-            // Recalculate actual arc needed at this radius
             val actualArc = if (items.size > 1) {
                 val neededArc = (minSpacing * (items.size - 1)) / radius
                 kotlin.math.min(neededArc.toDouble(), maxArcRad)
             } else 0.0
 
-            // Container size based on radius
-            val containerSize = (2 * radius + btnSize + 20 * density).toInt()
+            // Container size
+            val maxR = radius + btnSize / 2 + 10 * density
+            val containerSize = (2 * maxR).toInt()
             val containerW = containerSize
             val containerH = containerSize
             val container = android.widget.FrameLayout(this).apply {
@@ -1125,46 +1507,180 @@ Output:
             val centerX = containerW / 2f
             val centerY = containerH / 2f
 
-            // Fan direction: button on right -> fan left, button on left -> fan right
+            // Fan direction
             val midAngle = if (buttonOnRight) Math.toRadians(180.0) else Math.toRadians(0.0)
             val startAngle = midAngle - actualArc / 2
-            val endAngle = midAngle + actualArc / 2
             val angleStep = if (items.size > 1) actualArc / (items.size - 1) else 0.0
 
-            for ((index, item) in items.withIndex()) {
+            // Stack-based nested sub-menu system
+            data class MenuLevel(val buttons: MutableList<View>, val groupId: String?)
+            val menuStack = mutableListOf<MenuLevel>()
+            var lastCloseClickTime = 0L
+
+            fun hideLevel(level: MenuLevel) {
+                level.buttons.forEach { v ->
+                    v.animate().alpha(0f).setDuration(150).start()
+                    v.isClickable = false
+                    v.visibility = View.INVISIBLE
+                }
+            }
+
+            fun showLevel(level: MenuLevel) {
+                level.buttons.forEach { v ->
+                    v.visibility = View.VISIBLE
+                    v.animate().alpha(1f).setDuration(200).start()
+                    v.isClickable = true
+                }
+            }
+
+            fun closeCurrentLevel() {
+                if (menuStack.size <= 1) { closeMenu(); return }
+                val current = menuStack.removeAt(menuStack.lastIndex)
+                current.buttons.forEach { v ->
+                    v.animate().scaleX(0f).scaleY(0f).alpha(0f).setDuration(150).withEndAction {
+                        container.removeView(v)
+                    }.start()
+                }
+                // Show only the now-top level, keep all others hidden
+                if (menuStack.isNotEmpty()) showLevel(menuStack.last())
+            }
+
+            // Universal button view creator with appearance override support
+            fun createRadialButtonView(
+                itemId: String, defaultIcon: String, defaultColor: String, label: String,
+                elev: Float = 8f, animated: Boolean = false
+            ): View {
+                // Check for per-item appearance override
+                val override = getItemAppearance(this@OverlayService, itemId)
+                // For groups, use group's own iconType/icon/iconUri as defaults
+                val group = groupMap[itemId]
+                val effectiveIconType = override?.iconType ?: group?.iconType ?: "emoji"
+                val effectiveIcon = override?.icon ?: group?.icon ?: defaultIcon
+                val effectiveColor = override?.color ?: group?.color ?: defaultColor
+                val effectiveIconUri = override?.iconUri ?: group?.iconUri
+
+                val btn: View = if (effectiveIconType == "gallery" && !effectiveIconUri.isNullOrEmpty()) {
+                    android.widget.ImageView(this).apply {
+                        try { setImageURI(android.net.Uri.parse(effectiveIconUri)) }
+                        catch (_: Exception) { setImageResource(android.R.drawable.ic_menu_gallery) }
+                        scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                        clipToOutline = true
+                        outlineProvider = object : android.view.ViewOutlineProvider() {
+                            override fun getOutline(view: View, outline: android.graphics.Outline) {
+                                outline.setOval(0, 0, view.width, view.height)
+                            }
+                        }
+                        val gd = android.graphics.drawable.GradientDrawable().apply {
+                            shape = android.graphics.drawable.GradientDrawable.OVAL
+                            setColor(Color.parseColor(effectiveColor))
+                        }
+                        background = gd
+                        elevation = elev
+                    }
+                } else {
+                    val isTextIcon = effectiveIconType == "text"
+                    android.widget.TextView(this).apply {
+                        text = effectiveIcon
+                        textSize = if (isTextIcon) 11f else 18f
+                        gravity = Gravity.CENTER
+                        setTextColor(Color.WHITE)
+                        if (isTextIcon) {
+                            setTypeface(null, android.graphics.Typeface.BOLD)
+                            setPadding((2 * density).toInt(), 0, (2 * density).toInt(), 0)
+                            maxLines = 2
+                            ellipsize = android.text.TextUtils.TruncateAt.END
+                        }
+                        val gd = android.graphics.drawable.GradientDrawable().apply {
+                            shape = android.graphics.drawable.GradientDrawable.OVAL
+                            setColor(Color.parseColor(effectiveColor))
+                        }
+                        background = gd
+                        elevation = elev
+                    }
+                }
+                if (animated) { btn.scaleX = 0f; btn.scaleY = 0f; btn.alpha = 0f }
+                btn.setOnLongClickListener { showTopMessage(label); true }
+                return btn
+            }
+
+            fun openSubMenu(groupId: String, groupAngle: Double) {
+                val group = groupMap[groupId] ?: return
+                val childItems = group.children.mapNotNull { childId ->
+                    actionMap[childId]?.invoke()?.let { childId to it }
+                }
+                if (childItems.isEmpty()) { showTopMessage("Keine Items in Gruppe"); return }
+
+                // Hide ALL previous levels completely
+                for (level in menuStack) hideLevel(level)
+
+                // Use same radius as main menu for consistent placement
+                val subArc = if (childItems.size > 1) {
+                    val maxArcSub = if (childItems.size <= 5) 180.0
+                        else kotlin.math.min(180.0 + (childItems.size - 5) * 20.0, 300.0)
+                    val maxArcRadSub = Math.toRadians(maxArcSub)
+                    val needed = (minSpacing * (childItems.size - 1)) / radius
+                    kotlin.math.min(needed.toDouble(), maxArcRadSub)
+                } else 0.0
+                val subStartAngle = midAngle - subArc / 2
+                val subAngleStep = if (childItems.size > 1) subArc / (childItems.size - 1) else 0.0
+
+                val levelButtons = mutableListOf<View>()
+                for ((ci, pair) in childItems.withIndex()) {
+                    val (childId, childItem) = pair
+                    val cAngle = subStartAngle + subAngleStep * ci
+                    val cx = (centerX + radius * kotlin.math.cos(cAngle) - btnSize / 2).toInt()
+                    val cy = (centerY + radius * kotlin.math.sin(cAngle) - btnSize / 2).toInt()
+
+                    val childBtn = createRadialButtonView(
+                        childId, childItem.icon, childItem.color, childItem.label, 10f, true
+                    ).also { v ->
+                        if (groupMap.containsKey(childId)) {
+                            v.setOnClickListener { openSubMenu(childId, cAngle) }
+                        } else {
+                            v.setOnClickListener { childItem.action() }
+                        }
+                    }
+
+                    val clp = android.widget.FrameLayout.LayoutParams(btnSize, btnSize).apply {
+                        leftMargin = cx; topMargin = cy
+                    }
+                    container.addView(childBtn, clp)
+                    levelButtons.add(childBtn)
+                    childBtn.animate().scaleX(1f).scaleY(1f).alpha(1f)
+                        .setDuration(250).setStartDelay(ci * 50L).start()
+                }
+                menuStack.add(MenuLevel(levelButtons, groupId))
+            }
+
+            val mainLevelButtons = mutableListOf<View>()
+
+            for ((index, id) in itemIds.withIndex()) {
+                val item = actionMap[id]?.invoke() ?: continue
                 val angle = startAngle + angleStep * index
                 val ix = (centerX + radius * kotlin.math.cos(angle) - btnSize / 2).toInt()
                 val iy = (centerY + radius * kotlin.math.sin(angle) - btnSize / 2).toInt()
 
-                val btn = android.widget.TextView(this).apply {
-                    text = item.icon
-                    textSize = 18f
-                    gravity = Gravity.CENTER
-                    setTextColor(Color.WHITE)
+                val isGroup = groupMap.containsKey(id)
 
-                    val gd = android.graphics.drawable.GradientDrawable().apply {
-                        shape = android.graphics.drawable.GradientDrawable.OVAL
-                        setColor(Color.parseColor(item.color))
-                    }
-                    background = gd
-                    elevation = 8f
-                    setOnClickListener { item.action() }
-
-                    // Long press shows label
-                    setOnLongClickListener {
-                        showTopMessage(item.label)
-                        true
+                val btn = createRadialButtonView(id, item.icon, item.color, item.label).also { v ->
+                    if (isGroup) {
+                        v.setOnClickListener { openSubMenu(id, angle) }
+                    } else {
+                        v.setOnClickListener { item.action() }
                     }
                 }
 
                 val lp = android.widget.FrameLayout.LayoutParams(btnSize, btnSize).apply {
-                    leftMargin = ix
-                    topMargin = iy
+                    leftMargin = ix; topMargin = iy
                 }
                 container.addView(btn, lp)
+                mainLevelButtons.add(btn)
             }
 
-            // Close button in center
+            // Register main level on menu stack
+            menuStack.add(MenuLevel(mainLevelButtons, null))
+
+            // Close button in center: single click = back one level, double click = close all
             val closeBtn = android.widget.TextView(this).apply {
                 text = "\u2716"
                 textSize = 20f
@@ -1175,7 +1691,16 @@ Output:
                     setColor(Color.parseColor("#44FFFFFF"))
                 }
                 background = gd
-                setOnClickListener { closeMenu() }
+                setOnClickListener {
+                    val now = System.currentTimeMillis()
+                    if (now - lastCloseClickTime < 300) {
+                        // Double click -> close entire menu
+                        closeMenu()
+                    } else {
+                        lastCloseClickTime = now
+                        if (menuStack.size > 1) closeCurrentLevel() else closeMenu()
+                    }
+                }
             }
             val closeLp = android.widget.FrameLayout.LayoutParams(btnSize, btnSize).apply {
                 leftMargin = (centerX - btnSize / 2).toInt()
@@ -1193,7 +1718,6 @@ Output:
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
-                // Position so center aligns with button center
                 x = kotlin.math.max(0, kotlin.math.min(btnX - containerW / 2, screenWidth - containerW))
                 y = kotlin.math.max(0, kotlin.math.min(btnY - containerH / 2, screenHeight - containerH))
             }
@@ -1435,118 +1959,225 @@ Output:
 
             windowManager.addView(marketDataView, marketDataParams)
 
-            // Start Data Fetch Loop
-            marketDataJob = serviceScope.launch(Dispatchers.IO) {
-                while (isActive) {
-                    try {
-                        val currentPrefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
-                        val interval = currentPrefs.getInt("market_data_interval", 1) * 1000L
-                        val keysString = currentPrefs.getString("market_data_keys", "US500FU, USTECFU, DE40FU") ?: ""
-                        val targetKeys = keysString.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            // Start Data Fetch
+            val currentPrefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+            val dataSource = currentPrefs.getString("market_data_source", "firebase") ?: "firebase"
 
-                        val eqsBaseUrl = currentPrefs.getString("eqs_server_url", "") ?: ""
-                        val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-                        if (powerManager.isInteractive && eqsBaseUrl.isNotEmpty()) {
-                            val request = Request.Builder().url("${eqsBaseUrl}/market_data.php").build()
-                            httpClient.newCall(request).execute().use { response ->
-                                if (response.isSuccessful) {
-                                    val jsonStr = response.body?.string()
-                                    if (jsonStr != null) {
-                                        val jsonObj = JSONObject(jsonStr)
-                                        val pricesObj = jsonObj.getJSONObject("prices")
-
-                                        // Save all available keys from the API
-                                        val allKeys = mutableListOf<String>()
-                                        val keysIter = pricesObj.keys()
-                                        while (keysIter.hasNext()) {
-                                            allKeys.add(keysIter.next())
-                                        }
-                                        allKeys.sort()
-                                        currentPrefs.edit().putString("available_market_keys", allKeys.joinToString(",")).apply()
-
-                                        val sb = StringBuilder()
-                                        for (key in targetKeys) {
-                                            if (pricesObj.has(key)) {
-                                                val item = pricesObj.getJSONObject(key)
-                                                val price = item.getDouble("price")
-                                                val change = item.getDouble("change")
-
-                                                val formattedPrice = String.format(java.util.Locale.US, "%.2f", price)
-                                                val formattedChange = String.format(java.util.Locale.US, "%.2f", change)
-
-                                                val colorHex = when {
-                                                    change > 0 -> "#4CAF50" // Green
-                                                    change < 0 -> "#F44336" // Red
-                                                    else -> "#FFFFFF" // White
-                                                }
-
-                                                val sign = if (change > 0) "+" else ""
-                                                val displayKey = key.take(5)
-
-                                                sb.append("$displayKey: $formattedPrice (<font color='$colorHex'>$sign$formattedChange%</font>)&nbsp;&nbsp;&nbsp;")
-                                            }
-                                        }
-                                        val fullHtml = sb.toString().trim()
-                                        withContext(Dispatchers.Main) {
-                                            val tv = marketDataView?.findViewById<android.widget.TextView>(R.id.tvMarketData)
-                                            if (tv != null) {
-                                                val spanned = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                                    android.text.Html.fromHtml(fullHtml, android.text.Html.FROM_HTML_MODE_COMPACT)
-                                                } else {
-                                                    @Suppress("DEPRECATION")
-                                                    android.text.Html.fromHtml(fullHtml)
-                                                }
-                                                marketDataFullText = spanned
-                                                // Update fullscreen view if active
-                                                if (isMarketDataFullscreen) {
-                                                    val fsSpanned = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                                        android.text.Html.fromHtml(fullHtml.replace("&nbsp;&nbsp;&nbsp;", "<br/><br/>"), android.text.Html.FROM_HTML_MODE_COMPACT)
-                                                    } else {
-                                                        @Suppress("DEPRECATION")
-                                                        android.text.Html.fromHtml(fullHtml.replace("&nbsp;&nbsp;&nbsp;", "<br/><br/>"))
-                                                    }
-                                                    updateFullscreenText(fsSpanned)
-                                                }
-                                                if (!isMarketDataMinimized) {
-                                                    tv.text = spanned
-                                                    tv.maxLines = 10
-                                                } else {
-                                                    // Minimized: show configured number of values
-                                                    val minValues = currentPrefs.getInt("market_min_values", 1)
-                                                    val entries = fullHtml.split("&nbsp;&nbsp;&nbsp;").filter { it.isNotBlank() }
-                                                    val limitedHtml = entries.take(minValues).joinToString("  ")
-                                                    tv.text = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                                        android.text.Html.fromHtml(limitedHtml, android.text.Html.FROM_HTML_MODE_COMPACT)
-                                                    } else {
-                                                        @Suppress("DEPRECATION")
-                                                        android.text.Html.fromHtml(limitedHtml)
-                                                    }
-                                                    tv.maxLines = minValues
-                                                }
-                                            }
-                                            // Update status bar overlay if enabled
-                                            if (currentPrefs.getBoolean("market_notification_enabled", false)) {
-                                                updateMarketNotification(fullHtml)
-                                            }
-                                            // Update home screen widget cache (HTML with colors)
-                                            val widgetHtml = fullHtml.split("&nbsp;&nbsp;&nbsp;").filter { it.isNotBlank() }.joinToString("<br/>")
-                                            currentPrefs.edit().putString("market_widget_cache", widgetHtml).apply()
-                                            com.example.voicelistener.MarketDataWidget.updateAllWidgets(this@OverlayService)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        delay(interval)
-                    } catch (e: Exception) {
-                        FileLogger.log(this@OverlayService, "MarketData", "Fetch Error: ${e.message}")
-                        delay(1000L)
-                    }
-                }
+            if (dataSource == "firebase") {
+                startFirebaseSSE()
+            } else {
+                startEqsPolling()
             }
 
         } catch (e: Exception) {
             FileLogger.log(this, "MarketData", "Error showing widget: ${e.message}")
+        }
+    }
+
+    /** Firebase SSE streaming - receives data push when it changes */
+    private fun startFirebaseSSE() {
+        val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+        val fbUrl = (prefs.getString("firebase_market_url",
+            "https://marktdaten-2146e-default-rtdb.europe-west1.firebasedatabase.app/aktuelle_kurse") ?: "").trim()
+        if (fbUrl.isEmpty()) return
+
+        val sseUrl = if (fbUrl.endsWith(".json")) fbUrl else "$fbUrl.json"
+
+        marketDataJob = serviceScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try {
+                    FileLogger.log(this@OverlayService, "MarketData", "SSE connecting to $sseUrl")
+                    val request = Request.Builder()
+                        .url(sseUrl)
+                        .header("Accept", "text/event-stream")
+                        .build()
+
+                    // Use a separate client with no timeout for streaming
+                    val sseClient = httpClient.newBuilder()
+                        .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        .build()
+
+                    sseClient.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            FileLogger.log(this@OverlayService, "MarketData", "SSE failed: ${response.code}")
+                            delay(5000L)
+                            return@use
+                        }
+
+                        val source = response.body?.source() ?: return@use
+                        while (isActive && !source.exhausted()) {
+                            val line = source.readUtf8Line() ?: break
+
+                            // SSE format: "event: put" then "data: {json}"
+                            if (line.startsWith("data: ")) {
+                                val dataStr = line.removePrefix("data: ").trim()
+                                if (dataStr.isEmpty() || dataStr == "null") continue
+
+                                try {
+                                    val eventObj = JSONObject(dataStr)
+                                    val rawData = eventObj.get("data")
+
+                                    // "put" event: data contains the full or partial value
+                                    val pricesMap = parseFirebaseData(rawData)
+                                    if (pricesMap.isNotEmpty()) {
+                                        updateMarketDisplay(pricesMap)
+                                    }
+                                } catch (e: Exception) {
+                                    FileLogger.log(this@OverlayService, "MarketData", "SSE parse error: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                    // Connection closed, reconnect after delay
+                    FileLogger.log(this@OverlayService, "MarketData", "SSE connection closed, reconnecting...")
+                    delay(3000L)
+                } catch (e: java.io.IOException) {
+                    FileLogger.log(this@OverlayService, "MarketData", "SSE IO error: ${e.message}")
+                    delay(5000L)
+                } catch (e: Exception) {
+                    FileLogger.log(this@OverlayService, "MarketData", "SSE error: ${e.message}")
+                    delay(5000L)
+                }
+            }
+        }
+    }
+
+    /** Parse Firebase data (can be JSONArray or JSONObject) into symbol -> (price, change) */
+    private fun parseFirebaseData(rawData: Any): Map<String, Pair<Double, Double>> {
+        val pricesMap = mutableMapOf<String, Pair<Double, Double>>()
+        when (rawData) {
+            is org.json.JSONArray -> {
+                for (i in 0 until rawData.length()) {
+                    val item = rawData.optJSONObject(i) ?: continue
+                    val symbol = item.optString("symbol", "")
+                    if (symbol.isNotEmpty()) {
+                        pricesMap[symbol] = Pair(item.getDouble("price"), item.getDouble("change"))
+                    }
+                }
+            }
+            is org.json.JSONObject -> {
+                // Could be keyed object: {"US500FU": {"price":x, "change":y, "symbol":"US500FU"}}
+                val keysIter = rawData.keys()
+                while (keysIter.hasNext()) {
+                    val key = keysIter.next()
+                    val item = rawData.optJSONObject(key) ?: continue
+                    val symbol = item.optString("symbol", key)
+                    pricesMap[symbol] = Pair(item.getDouble("price"), item.getDouble("change"))
+                }
+            }
+        }
+        return pricesMap
+    }
+
+    /** EQS polling - fetches every N seconds */
+    private fun startEqsPolling() {
+        marketDataJob = serviceScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try {
+                    val currentPrefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+                    val interval = currentPrefs.getInt("market_data_interval", 1) * 1000L
+                    val eqsBaseUrl = currentPrefs.getString("eqs_server_url", "") ?: ""
+                    val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+
+                    if (powerManager.isInteractive && eqsBaseUrl.isNotEmpty()) {
+                        val request = Request.Builder().url("${eqsBaseUrl}/live_prices.json").build()
+                        httpClient.newCall(request).execute().use { response ->
+                            if (response.isSuccessful) {
+                                val jsonStr = response.body?.string()
+                                if (jsonStr != null) {
+                                    val jsonObj = JSONObject(jsonStr)
+                                    val pricesObj = jsonObj.getJSONObject("prices")
+                                    val pricesMap = mutableMapOf<String, Pair<Double, Double>>()
+                                    val keysIter = pricesObj.keys()
+                                    while (keysIter.hasNext()) {
+                                        val key = keysIter.next()
+                                        val item = pricesObj.getJSONObject(key)
+                                        pricesMap[key] = Pair(item.getDouble("price"), item.getDouble("change"))
+                                    }
+                                    updateMarketDisplay(pricesMap)
+                                }
+                            }
+                        }
+                    }
+                    delay(interval)
+                } catch (e: Exception) {
+                    FileLogger.log(this@OverlayService, "MarketData", "EQS Fetch Error: ${e.message}")
+                    delay(1000L)
+                }
+            }
+        }
+    }
+
+    /** Shared display update logic for both data sources */
+    private suspend fun updateMarketDisplay(pricesMap: Map<String, Pair<Double, Double>>) {
+        val currentPrefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+        val keysString = currentPrefs.getString("market_data_keys", "US500FU, USTECFU, DE40FU") ?: ""
+        val targetKeys = keysString.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+
+        // Save all available keys
+        val allKeys = pricesMap.keys.sorted()
+        currentPrefs.edit().putString("available_market_keys", allKeys.joinToString(",")).apply()
+
+        val sb = StringBuilder()
+        for (key in targetKeys) {
+            val data = pricesMap[key]
+            if (data != null) {
+                val price = data.first
+                val change = data.second
+                val formattedPrice = String.format(java.util.Locale.US, "%.2f", price)
+                val formattedChange = String.format(java.util.Locale.US, "%.2f", change)
+                val colorHex = when {
+                    change > 0 -> "#4CAF50"
+                    change < 0 -> "#F44336"
+                    else -> "#FFFFFF"
+                }
+                val sign = if (change > 0) "+" else ""
+                val displayKey = key.take(5)
+                sb.append("$displayKey: $formattedPrice (<font color='$colorHex'>$sign$formattedChange%</font>)&nbsp;&nbsp;&nbsp;")
+            }
+        }
+        val fullHtml = sb.toString().trim()
+        withContext(Dispatchers.Main) {
+            val tv = marketDataView?.findViewById<android.widget.TextView>(R.id.tvMarketData)
+            if (tv != null) {
+                val spanned = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    android.text.Html.fromHtml(fullHtml, android.text.Html.FROM_HTML_MODE_COMPACT)
+                } else {
+                    @Suppress("DEPRECATION")
+                    android.text.Html.fromHtml(fullHtml)
+                }
+                marketDataFullText = spanned
+                if (isMarketDataFullscreen) {
+                    val fsSpanned = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        android.text.Html.fromHtml(fullHtml.replace("&nbsp;&nbsp;&nbsp;", "<br/><br/>"), android.text.Html.FROM_HTML_MODE_COMPACT)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        android.text.Html.fromHtml(fullHtml.replace("&nbsp;&nbsp;&nbsp;", "<br/><br/>"))
+                    }
+                    updateFullscreenText(fsSpanned)
+                }
+                if (!isMarketDataMinimized) {
+                    tv.text = spanned
+                    tv.maxLines = 10
+                } else {
+                    val minValues = currentPrefs.getInt("market_min_values", 1)
+                    val entries = fullHtml.split("&nbsp;&nbsp;&nbsp;").filter { it.isNotBlank() }
+                    val limitedHtml = entries.take(minValues).joinToString("  ")
+                    tv.text = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        android.text.Html.fromHtml(limitedHtml, android.text.Html.FROM_HTML_MODE_COMPACT)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        android.text.Html.fromHtml(limitedHtml)
+                    }
+                    tv.maxLines = minValues
+                }
+            }
+            if (currentPrefs.getBoolean("market_notification_enabled", false)) {
+                updateMarketNotification(fullHtml)
+            }
+            val widgetHtml = fullHtml.split("&nbsp;&nbsp;&nbsp;").filter { it.isNotBlank() }.joinToString("<br/>")
+            currentPrefs.edit().putString("market_widget_cache", widgetHtml).apply()
+            com.example.voicelistener.MarketDataWidget.updateAllWidgets(this@OverlayService)
         }
     }
 
@@ -2679,6 +3310,300 @@ Output:
         startForegroundNotification(true)
     }
 
+    // ─── Voice Chat Widget (Record → LLM → TTS) ───
+
+    private fun startVoiceChatRecording() {
+        if (isRecording || isVoiceChatRecording) return
+
+        // Stop TTS if still speaking from previous recording
+        if (tts?.isSpeaking == true || isGeminiSpeaking) {
+            tts?.stop()
+            stopGeminiAudio()
+            FileLogger.log(this, "VoiceChat", "Stopped TTS for new recording")
+        }
+
+        isVoiceChatRecording = true
+        recordingStartTime = System.currentTimeMillis()
+        FileLogger.log(this, "VoiceChat", "Starting recording...")
+
+        // Haptic feedback
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+        vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+
+        try {
+            audioRecorder?.startRecording()
+            VoiceChatWidget.updateState(this, "recording")
+        } catch (e: Exception) {
+            FileLogger.log(this, "VoiceChat", "Start failed: ${e.message}")
+            isVoiceChatRecording = false
+            VoiceChatWidget.updateState(this, "idle")
+        }
+    }
+
+    private fun stopVoiceChatRecording() {
+        if (!isVoiceChatRecording) return
+        val realDuration = System.currentTimeMillis() - recordingStartTime
+        FileLogger.log(this, "VoiceChat", "Stopping recording... (${realDuration}ms)")
+        isVoiceChatRecording = false
+
+        if (realDuration < 1000) {
+            FileLogger.log(this, "VoiceChat", "Dropped: Too short (< 1s)")
+            audioRecorder?.cancelRecording()
+            VoiceChatWidget.updateState(this, "idle")
+            return
+        }
+
+        VoiceChatWidget.updateState(this, "processing")
+
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                audioRecorder?.stopRecording()
+                val file = audioRecorder?.getOutputFile()
+                if (file != null && file.exists() && file.length() > 0) {
+                    processVoiceChatAudio(file)
+                } else {
+                    FileLogger.log(this@OverlayService, "VoiceChat", "File failed (empty or missing)")
+                    withContext(Dispatchers.Main) { VoiceChatWidget.updateState(this@OverlayService, "idle") }
+                }
+            } catch (e: Exception) {
+                FileLogger.log(this@OverlayService, "VoiceChat", "Stop failed: ${e.message}")
+                withContext(Dispatchers.Main) { VoiceChatWidget.updateState(this@OverlayService, "idle") }
+            }
+        }
+    }
+
+    private fun processVoiceChatAudio(file: File) {
+        val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+        val apiKey = prefs.getString("groq_api_key", "") ?: ""
+
+        if (apiKey.isEmpty()) {
+            FileLogger.log(this, "VoiceChat", "No API Key found")
+            serviceScope.launch(Dispatchers.Main) {
+                Toast.makeText(this@OverlayService, "API Key fehlt!", Toast.LENGTH_SHORT).show()
+                VoiceChatWidget.updateState(this@OverlayService, "idle")
+            }
+            return
+        }
+
+        val auth = "Bearer $apiKey"
+
+        serviceScope.launch {
+            try {
+                // 1. Whisper transcription
+                FileLogger.log(this@OverlayService, "VoiceChat", "Sending to Whisper...")
+                val requestFile = file.asRequestBody("audio/m4a".toMediaTypeOrNull())
+                val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
+                val modelPart = "whisper-large-v3".toRequestBody("text/plain".toMediaTypeOrNull())
+                val transResponse = GroqClient.api.transcribeAudio(auth, body, modelPart)
+                val rawText = transResponse.text
+                FileLogger.log(this@OverlayService, "VoiceChat", "Whisper: $rawText")
+
+                // 2. LLM - prefer Gemini + Search for Voice Chat, fallback to Groq
+                val geminiKey = prefs.getString("gemini_api_key", "") ?: ""
+                val cleanAnswer: String
+                if (geminiKey.isNotEmpty()) {
+                    FileLogger.log(this@OverlayService, "VoiceChat", "Sending to Gemini + Search...")
+                    cleanAnswer = chatWithGemini(geminiKey, listOf(Message("user", rawText)), "gemini-2.5-flash", true)
+                } else {
+                    FileLogger.log(this@OverlayService, "VoiceChat", "Sending to Groq LLM...")
+                    val chatResponse = chatWithFallback(auth, listOf(Message("user", rawText)))
+                    cleanAnswer = stripThinkingBlock(chatResponse.choices.firstOrNull()?.message?.content ?: "")
+                }
+                FileLogger.log(this@OverlayService, "VoiceChat", "LLM: ${cleanAnswer.take(100)}")
+
+                // 3. TTS
+                withContext(Dispatchers.Main) {
+                    speakText(cleanAnswer)
+                }
+            } catch (e: Exception) {
+                FileLogger.log(this@OverlayService, "VoiceChat", "Error: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    VoiceChatWidget.updateState(this@OverlayService, "idle")
+                    Toast.makeText(this@OverlayService, "Fehler: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private var pendingSpeakText: String? = null
+
+    private fun speakText(text: String) {
+        if (text.isBlank()) {
+            VoiceChatWidget.updateState(this, "idle")
+            return
+        }
+
+        val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+        val geminiKey = prefs.getString("gemini_api_key", "") ?: ""
+
+        if (geminiKey.isNotEmpty()) {
+            speakWithGemini(text, geminiKey)
+        } else {
+            speakWithSystemTts(text)
+        }
+    }
+
+    private fun speakWithGemini(text: String, apiKey: String) {
+        VoiceChatWidget.updateState(this, "speaking")
+        FileLogger.log(this, "GeminiTTS", "Starting TTS for: ${text.take(60)}...")
+
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val requestBody = JSONObject().apply {
+                    put("contents", JSONArray().put(JSONObject().apply {
+                        put("parts", JSONArray().put(JSONObject().apply {
+                            put("text", text)
+                        }))
+                    }))
+                    put("generationConfig", JSONObject().apply {
+                        put("responseModalities", JSONArray().put("AUDIO"))
+                        put("speechConfig", JSONObject().apply {
+                            put("voiceConfig", JSONObject().apply {
+                                put("prebuiltVoiceConfig", JSONObject().apply {
+                                    put("voiceName", "Kore")
+                                })
+                            })
+                        })
+                    })
+                }
+
+                val request = Request.Builder()
+                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=$apiKey")
+                    .post(requestBody.toString().toRequestBody("application/json".toMediaTypeOrNull()))
+                    .build()
+
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
+                val response = client.newCall(request).execute()
+                val responseBody = response.body?.string() ?: ""
+
+                if (!response.isSuccessful) {
+                    FileLogger.log(this@OverlayService, "GeminiTTS", "API error ${response.code}: ${responseBody.take(200)}")
+                    withContext(Dispatchers.Main) {
+                        // Fallback to system TTS
+                        speakWithSystemTts(text)
+                    }
+                    return@launch
+                }
+
+                val json = JSONObject(responseBody)
+                val audioData = json
+                    .getJSONArray("candidates")
+                    .getJSONObject(0)
+                    .getJSONObject("content")
+                    .getJSONArray("parts")
+                    .getJSONObject(0)
+                    .getJSONObject("inlineData")
+                    .getString("data")
+
+                val pcmBytes = Base64.decode(audioData, Base64.DEFAULT)
+                FileLogger.log(this@OverlayService, "GeminiTTS", "Got ${pcmBytes.size} bytes PCM audio")
+
+                withContext(Dispatchers.Main) {
+                    playPcmAudio(pcmBytes)
+                }
+            } catch (e: Exception) {
+                FileLogger.log(this@OverlayService, "GeminiTTS", "Error: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    // Fallback to system TTS
+                    speakWithSystemTts(text)
+                }
+            }
+        }
+    }
+
+    private fun playPcmAudio(pcmBytes: ByteArray) {
+        stopGeminiAudio()
+
+        val sampleRate = 24000
+        val audioFormat = AudioFormat.Builder()
+            .setSampleRate(sampleRate)
+            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+            .build()
+
+        audioTrack = AudioTrack.Builder()
+            .setAudioAttributes(AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build())
+            .setAudioFormat(audioFormat)
+            .setBufferSizeInBytes(pcmBytes.size)
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .build()
+
+        audioTrack?.write(pcmBytes, 0, pcmBytes.size)
+        audioTrack?.setNotificationMarkerPosition(pcmBytes.size / 2) // 2 bytes per sample (16-bit)
+        audioTrack?.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
+            override fun onMarkerReached(track: AudioTrack?) {
+                isGeminiSpeaking = false
+                VoiceChatWidget.updateState(this@OverlayService, "idle")
+                track?.release()
+                audioTrack = null
+            }
+            override fun onPeriodicNotification(track: AudioTrack?) {}
+        })
+
+        isGeminiSpeaking = true
+        audioTrack?.play()
+    }
+
+    private fun stopGeminiAudio() {
+        if (isGeminiSpeaking) {
+            try {
+                audioTrack?.stop()
+                audioTrack?.release()
+            } catch (_: Exception) {}
+            audioTrack = null
+            isGeminiSpeaking = false
+        }
+    }
+
+    private fun speakWithSystemTts(text: String) {
+        // Shutdown old TTS instance
+        tts?.stop()
+        tts?.shutdown()
+        ttsReady = false
+
+        pendingSpeakText = text
+        VoiceChatWidget.updateState(this, "speaking")
+        FileLogger.log(this, "SystemTTS", "Starting TTS for: ${text.take(60)}...")
+
+        val initListener = TextToSpeech.OnInitListener { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                ttsReady = true
+                val toSpeak = pendingSpeakText ?: return@OnInitListener
+                pendingSpeakText = null
+
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(utteranceId: String?) {
+                        VoiceChatWidget.updateState(this@OverlayService, "idle")
+                    }
+                    override fun onError(utteranceId: String?) {
+                        VoiceChatWidget.updateState(this@OverlayService, "idle")
+                    }
+                })
+                tts?.speak(toSpeak, TextToSpeech.QUEUE_FLUSH, null, "voice_chat_response")
+            } else {
+                FileLogger.log(this@OverlayService, "SystemTTS", "Init failed status=$status")
+                VoiceChatWidget.updateState(this@OverlayService, "idle")
+            }
+        }
+
+        tts = TextToSpeech(this, initListener)
+    }
+
+    // ─── Overlay Recording ───
+
     private fun startRecording() {
         recordingStartTime = System.currentTimeMillis()
         FileLogger.log(this, "Recording", "Starting recording...")
@@ -2950,7 +3875,7 @@ Farben für den Button:
 
 Textbausteine (Expansion Rules):
 - Kürzel → Ersetzung (z.B. "aa" → "/")
-- Funktions-Ersetzungen: {{DATE}} (Datum), {{TIME}} (Uhrzeit), {{DATETIME}} (Datum+Uhrzeit), {{CLEAR}} (Feld leeren), {{UPPERCASE}} (Großbuchstaben), {{LOWERCASE}} (Kleinbuchstaben)
+- Funktions-Ersetzungen: {{DATE}} (Datum), {{TIME}} (Uhrzeit), {{DATETIME}} (Datum+Uhrzeit), {{CLEAR}} (Feld leeren), {{UPPERCASE}} (Großbuchstaben), {{LOWERCASE}} (Kleinbuchstaben), {{COPY_ALL}} (Alles kopieren), {{CUT_ALL}} (Alles ausschneiden)
 
 Beispiele für Befehle:
 "Mach den Button größer, 150 Prozent" → [{"action":"set_float","key":"overlay_scale","value":1.5}]

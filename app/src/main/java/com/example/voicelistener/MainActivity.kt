@@ -33,8 +33,55 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import android.view.ViewGroup
 import android.view.LayoutInflater
 import java.util.Collections
-
+import androidx.drawerlayout.widget.DrawerLayout
+import com.google.android.material.navigation.NavigationView
 class MainActivity : AppCompatActivity() {
+
+    private lateinit var drawerLayout: DrawerLayout
+    private var pendingGroupIconCallback: ((Uri) -> Unit)? = null
+    private val groupIconPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            // Persist permission so we can read this URI later
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Exception) {}
+            // Copy image to internal storage for reliable access
+            val destFile = java.io.File(filesDir, "group_icon_${System.currentTimeMillis()}.png")
+            try {
+                contentResolver.openInputStream(uri)?.use { input ->
+                    val bmp = android.graphics.BitmapFactory.decodeStream(input)
+                    val scaled = android.graphics.Bitmap.createScaledBitmap(bmp, 96, 96, true)
+                    java.io.FileOutputStream(destFile).use { out ->
+                        scaled.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                    }
+                }
+                pendingGroupIconCallback?.invoke(Uri.fromFile(destFile))
+            } catch (e: Exception) {
+                Toast.makeText(this, "Bild konnte nicht geladen werden", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private val sectionIds = mapOf(
+        R.id.nav_general to R.id.sectionGeneral,
+        R.id.nav_button to R.id.sectionButton,
+        R.id.nav_gestures to R.id.sectionGestures,
+        R.id.nav_radial to R.id.sectionRadial,
+        R.id.nav_market to R.id.sectionMarket,
+        R.id.nav_textexpansion to R.id.sectionTextExpansion,
+        R.id.nav_tasker to R.id.sectionTasker,
+        R.id.nav_system to R.id.sectionSystem
+    )
+
+    private fun showSection(menuItemId: Int) {
+        for ((_, sectionId) in sectionIds) {
+            findViewById<View>(sectionId)?.visibility = View.GONE
+        }
+        val targetSection = sectionIds[menuItemId] ?: R.id.sectionGeneral
+        findViewById<View>(targetSection)?.visibility = View.VISIBLE
+    }
 
     private fun sendUpdateIntent() {
         val intent = Intent(this, com.example.voicelistener.services.OverlayService::class.java)
@@ -79,6 +126,25 @@ class MainActivity : AppCompatActivity() {
     private fun onCreateInner(savedInstanceState: Bundle?) {
         setContentView(R.layout.activity_main)
 
+        // Setup Drawer
+        drawerLayout = findViewById(R.id.drawerLayout)
+        val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
+        setSupportActionBar(toolbar)
+        supportActionBar?.setDisplayHomeAsUpEnabled(false)
+        findViewById<View>(R.id.toolbarMenuButton).setOnClickListener {
+            drawerLayout.openDrawer(android.view.Gravity.START)
+        }
+
+        val navigationView = findViewById<NavigationView>(R.id.navigationView)
+        navigationView.setNavigationItemSelectedListener { menuItem ->
+            showSection(menuItem.itemId)
+            drawerLayout.closeDrawers()
+            true
+        }
+        // Show "Allgemein" by default
+        navigationView.setCheckedItem(R.id.nav_general)
+        showSection(R.id.nav_general)
+
         checkPermissions()
 
         // Check Accessibility once on startup
@@ -86,11 +152,6 @@ class MainActivity : AppCompatActivity() {
             checkAccessibilityPermission()
         }
 
-        val helpBtn = findViewById<Button>(R.id.helpButton)
-        helpBtn.setOnClickListener {
-            startActivity(Intent(this, HelpActivity::class.java))
-        }
-        
         val apiKeyInput = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.apiKeyInput)
         val eqsServerUrlInput = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.eqsServerUrlInput)
         val saveButton = findViewById<Button>(R.id.saveButton)
@@ -112,12 +173,15 @@ class MainActivity : AppCompatActivity() {
         promptInput.setOnTouchListener(scrollTouchListener)
         vocabInput.setOnTouchListener(scrollTouchListener)
 
+        val geminiApiKeyInput = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.geminiApiKeyInput)
+
         val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
         apiKeyInput.setText(prefs.getString("groq_api_key", ""))
+        geminiApiKeyInput.setText(prefs.getString("gemini_api_key", ""))
         eqsServerUrlInput.setText(prefs.getString("eqs_server_url", ""))
 
         // LLM Model Spinner
-        val llmModels = arrayOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3-32b")
+        val llmModels = arrayOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3-32b", "gemini-2.5-flash", "gemini-2.5-flash + Search")
         val llmModelSpinner = findViewById<android.widget.Spinner>(R.id.llmModelSpinner)
         llmModelSpinner.adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, llmModels)
         val savedModel = prefs.getString("llm_model", llmModels[0]) ?: llmModels[0]
@@ -158,6 +222,37 @@ class MainActivity : AppCompatActivity() {
         val marketIntervalInput = findViewById<EditText>(R.id.marketIntervalInput)
         val marketKeysSelectButton = findViewById<Button>(R.id.marketKeysSelectButton)
         val marketKeysDisplay = findViewById<TextView>(R.id.marketKeysDisplay)
+
+        // --- Market Data Source Toggle ---
+        val marketSourceGroup = findViewById<android.widget.RadioGroup>(R.id.marketSourceGroup)
+        val radioSourceEqs = findViewById<android.widget.RadioButton>(R.id.radioSourceEqs)
+        val radioSourceFirebase = findViewById<android.widget.RadioButton>(R.id.radioSourceFirebase)
+        val firebaseUrlInput = findViewById<EditText>(R.id.firebaseUrlInput)
+
+        val currentSource = prefs.getString("market_data_source", "firebase") ?: "firebase"
+        if (currentSource == "firebase") {
+            radioSourceFirebase.isChecked = true
+            firebaseUrlInput.visibility = android.view.View.VISIBLE
+        } else {
+            radioSourceEqs.isChecked = true
+            firebaseUrlInput.visibility = android.view.View.GONE
+        }
+        firebaseUrlInput.setText(prefs.getString("firebase_market_url",
+            "https://marktdaten-2146e-default-rtdb.europe-west1.firebasedatabase.app/aktuelle_kurse"))
+
+        marketSourceGroup.setOnCheckedChangeListener { _, checkedId ->
+            val source = if (checkedId == R.id.radioSourceFirebase) "firebase" else "eqs"
+            prefs.edit().putString("market_data_source", source).apply()
+            firebaseUrlInput.visibility = if (source == "firebase") android.view.View.VISIBLE else android.view.View.GONE
+        }
+
+        firebaseUrlInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                prefs.edit().putString("firebase_market_url", s.toString().trim()).apply()
+            }
+        })
 
         appEqsContextCheck.isChecked = prefs.getBoolean("app_eqs_context_enabled", true)
         marketKeysInput.setText(prefs.getString("market_data_keys", "US500FU, USTECFU, DE40FU"))
@@ -241,7 +336,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // --- Swipe Gesture Settings ---
-        val actionEntries = GestureManager.ACTION_LABELS.entries.toList()
+        val actionEntries = GestureManager.getAllActionLabels(this).entries.toList()
         val actionLabels = actionEntries.map { it.value }
         val actionKeys = actionEntries.map { it.key }
 
@@ -304,6 +399,11 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().putInt("overlay_color", selectedColor).apply()
         }
 
+        // --- TTS System Settings ---
+        findViewById<Button>(R.id.ttsSystemSettingsButton).setOnClickListener {
+            startActivity(Intent("com.android.settings.TTS_SETTINGS"))
+        }
+
         // --- Text Expansion Setup ---
         val expansionCheck = findViewById<CheckBox>(R.id.textExpansionCheckBox)
         expansionCheck.isChecked = prefs.getBoolean("text_expansion_enabled", false)
@@ -321,6 +421,9 @@ class MainActivity : AppCompatActivity() {
             exportExpansionRules()
             Toast.makeText(this, "Textbausteine exportiert", Toast.LENGTH_SHORT).show()
         }
+
+        // --- Tasker Setup ---
+        setupTaskerUI()
 
         val stopButton = findViewById<Button>(R.id.stopButton)
         stopButton.setOnClickListener {
@@ -348,6 +451,7 @@ class MainActivity : AppCompatActivity() {
 
                 prefs.edit()
                     .putString("groq_api_key", key)
+                    .putString("gemini_api_key", geminiApiKeyInput.text.toString().trim())
                     .putString("eqs_server_url", eqsUrl)
                     .putString("llama_system_prompt", prompt)
                     .putString("custom_vocabulary", vocab)
@@ -383,7 +487,42 @@ class MainActivity : AppCompatActivity() {
         }
 
         saveButton.setOnClickListener(saveAndStartAction)
-        findViewById<Button>(R.id.saveButtonTop).setOnClickListener(saveAndStartAction)
+
+        // Wire up all section footer buttons (Save & Start + Save Only)
+        val saveOnlyAction = View.OnClickListener {
+            val key = apiKeyInput.text.toString().trim()
+            val eqsUrl = eqsServerUrlInput.text.toString().trim().trimEnd('/')
+            val prompt = promptInput.text.toString().trim()
+            val vocab = vocabInput.text.toString().trim()
+            val marketIntervalStr = findViewById<EditText>(R.id.marketIntervalInput).text.toString()
+            val marketInterval = marketIntervalStr.toIntOrNull() ?: 1
+            SettingsBackup.createBackup(this, "Save Only")
+            prefs.edit()
+                .putString("groq_api_key", key)
+                .putString("gemini_api_key", geminiApiKeyInput.text.toString().trim())
+                .putString("eqs_server_url", eqsUrl)
+                .putString("llama_system_prompt", prompt)
+                .putString("custom_vocabulary", vocab)
+                .putBoolean("clipboard_history_enabled", findViewById<CheckBox>(R.id.clipboardHistoryEnabledCheckBox).isChecked)
+                .putBoolean("app_eqs_context_enabled", findViewById<CheckBox>(R.id.appEqsContextCheckBox).isChecked)
+                .putString("market_data_keys", prefs.getString("market_data_keys", "US500FU, USTECFU, DE40FU"))
+                .putInt("market_data_interval", marketInterval)
+                .putInt("market_min_values", findViewById<android.widget.Spinner>(R.id.marketMinValuesSpinner).selectedItemPosition + 1)
+                .putBoolean("market_notification_enabled", findViewById<CheckBox>(R.id.marketNotificationCheckBox).isChecked)
+                .apply()
+            Toast.makeText(this, "Einstellungen gespeichert!", Toast.LENGTH_SHORT).show()
+        }
+
+        val footerIds = listOf(
+            R.id.footerGeneral, R.id.footerButton, R.id.footerGestures,
+            R.id.footerRadial, R.id.footerMarket, R.id.footerTextExpansion,
+            R.id.footerTasker, R.id.footerSystem
+        )
+        for (footerId in footerIds) {
+            val footer = findViewById<View>(footerId) ?: continue
+            footer.findViewById<Button>(R.id.btnSaveAndStart)?.setOnClickListener(saveAndStartAction)
+            footer.findViewById<Button>(R.id.btnSaveOnly)?.setOnClickListener(saveOnlyAction)
+        }
 
         val settingsBtn = findViewById<Button>(R.id.openAccessibilitySettings)
         settingsBtn.setOnClickListener {
@@ -509,6 +648,194 @@ class MainActivity : AppCompatActivity() {
         refreshLogs()
     }
     
+    private fun setupTaskerUI() {
+        refreshTaskerList()
+        findViewById<Button>(R.id.btnAddTaskerTask).setOnClickListener {
+            showTaskerEditDialog(null)
+        }
+    }
+
+    private fun refreshTaskerList() {
+        val container = findViewById<LinearLayout>(R.id.taskerTasksContainer)
+        container.removeAllViews()
+        val tasks = TaskerHelper.getTasks(this)
+        val density = resources.displayMetrics.density
+
+        for (task in tasks) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, (4 * density).toInt(), 0, (4 * density).toInt())
+            }
+
+            val infoText = TextView(this).apply {
+                text = "${task.name}\n  Task: ${task.taskName}" +
+                    (if (task.par1.isNotEmpty()) "\n  par1: ${task.par1}" else "") +
+                    (if (task.par2.isNotEmpty()) "\n  par2: ${task.par2}" else "")
+                textSize = 12f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            row.addView(infoText)
+
+            // Test button
+            val testBtn = Button(this).apply {
+                text = "Test"
+                textSize = 10f
+                minWidth = 0
+                minimumWidth = 0
+                setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (36 * density).toInt()
+                ).apply { marginStart = (4 * density).toInt() }
+                setOnClickListener {
+                    TaskerHelper.executeTask(this@MainActivity, task)
+                    Toast.makeText(this@MainActivity, "Tasker: ${task.taskName} gesendet", Toast.LENGTH_SHORT).show()
+                }
+            }
+            row.addView(testBtn)
+
+            // Edit button
+            val editBtn = Button(this).apply {
+                text = "Edit"
+                textSize = 10f
+                minWidth = 0
+                minimumWidth = 0
+                setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (36 * density).toInt()
+                ).apply { marginStart = (4 * density).toInt() }
+                setOnClickListener { showTaskerEditDialog(task) }
+            }
+            row.addView(editBtn)
+
+            // Delete button
+            val delBtn = Button(this).apply {
+                text = "X"
+                textSize = 10f
+                minWidth = 0
+                minimumWidth = 0
+                setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
+                setBackgroundColor(android.graphics.Color.parseColor("#B00020"))
+                setTextColor(android.graphics.Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    (36 * density).toInt()
+                ).apply { marginStart = (4 * density).toInt() }
+                setOnClickListener {
+                    TaskerHelper.removeTask(this@MainActivity, task.id)
+                    // Remove from radial menu config
+                    val actionId = TaskerHelper.actionIdForTask(task)
+                    val rmPrefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                    val rmConfigJson = rmPrefs.getString("radial_menu_config", null)
+                    if (rmConfigJson != null) {
+                        try {
+                            val arr = org.json.JSONArray(rmConfigJson)
+                            val newArr = org.json.JSONArray()
+                            for (i in 0 until arr.length()) {
+                                if (arr.getString(i) != actionId) newArr.put(arr.getString(i))
+                            }
+                            rmPrefs.edit().putString("radial_menu_config", newArr.toString()).apply()
+                        } catch (_: Exception) {}
+                    }
+                    refreshTaskerList()
+                    Toast.makeText(this@MainActivity, "${task.name} gelöscht", Toast.LENGTH_SHORT).show()
+                }
+            }
+            row.addView(delBtn)
+
+            container.addView(row)
+        }
+
+        if (tasks.isEmpty()) {
+            val emptyText = TextView(this).apply {
+                text = "Keine Tasker-Tasks angelegt."
+                textSize = 12f
+                setTextColor(android.graphics.Color.parseColor("#888888"))
+            }
+            container.addView(emptyText)
+        }
+    }
+
+    private fun showTaskerEditDialog(existing: TaskerTask?) {
+        val isEdit = existing != null
+        val density = resources.displayMetrics.density
+        val pad = (16 * density).toInt()
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+        }
+
+        val nameInput = EditText(this).apply {
+            hint = "Anzeigename (z.B. 'Licht an')"
+            setText(existing?.name ?: "")
+            textSize = 14f
+        }
+        layout.addView(nameInput)
+
+        val taskNameInput = EditText(this).apply {
+            hint = "Tasker Task-Name (exakt wie in Tasker)"
+            setText(existing?.taskName ?: "")
+            textSize = 14f
+        }
+        layout.addView(taskNameInput)
+
+        val par1Input = EditText(this).apply {
+            hint = "par1 (optional)"
+            setText(existing?.par1 ?: "")
+            textSize = 14f
+        }
+        layout.addView(par1Input)
+
+        val par2Input = EditText(this).apply {
+            hint = "par2 (optional)"
+            setText(existing?.par2 ?: "")
+            textSize = 14f
+        }
+        layout.addView(par2Input)
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle(if (isEdit) "Task bearbeiten" else "Neuer Tasker-Task")
+            .setView(layout)
+            .setPositiveButton("Speichern") { _, _ ->
+                val name = nameInput.text.toString().trim()
+                val taskName = taskNameInput.text.toString().trim()
+                if (name.isEmpty() || taskName.isEmpty()) {
+                    Toast.makeText(this, "Name und Task-Name sind Pflichtfelder", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val task = TaskerTask(
+                    id = existing?.id ?: TaskerHelper.generateId(),
+                    name = name,
+                    taskName = taskName,
+                    par1 = par1Input.text.toString().trim(),
+                    par2 = par2Input.text.toString().trim()
+                )
+                if (isEdit) {
+                    TaskerHelper.updateTask(this, task)
+                } else {
+                    TaskerHelper.addTask(this, task)
+                    // Add new task to radial menu config as enabled by default
+                    val actionId = TaskerHelper.actionIdForTask(task)
+                    val rmPrefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                    val configJson = rmPrefs.getString("radial_menu_config", null)
+                    if (configJson != null) {
+                        try {
+                            val arr = org.json.JSONArray(configJson)
+                            arr.put(actionId)
+                            rmPrefs.edit().putString("radial_menu_config", arr.toString()).apply()
+                        } catch (_: Exception) {}
+                    }
+                }
+                refreshTaskerList()
+                Toast.makeText(this, "Task '$name' gespeichert", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Abbrechen", null)
+            .show()
+    }
+
     private fun refreshLogs() {
         val logView = findViewById<TextView>(R.id.logTextView)
         logView.text = com.example.voicelistener.utils.FileLogger.getLogContent(this)
@@ -555,7 +882,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<CheckBox>(R.id.alwaysHiddenCheckBox).isChecked = prefs.getBoolean("overlay_always_hidden", false)
 
         // Refresh Swipe Spinners
-        val actionKeys = GestureManager.ACTION_LABELS.keys.toList()
+        val actionKeys = GestureManager.getAllActionLabels(this).keys.toList()
         fun refreshSpinner(spinnerId: Int, prefKey: String, defaultAction: String) {
             val spinner = findViewById<Spinner>(spinnerId)
             val current = prefs.getString(prefKey, defaultAction) ?: defaultAction
@@ -663,7 +990,7 @@ class MainActivity : AppCompatActivity() {
         val container = findViewById<android.widget.LinearLayout>(R.id.radialMenuContainer)
         container.removeAllViews()
 
-        val allItems = com.example.voicelistener.services.OverlayService.ALL_RADIAL_ITEMS
+        val allItems = com.example.voicelistener.services.OverlayService.getAllRadialItems(this)
 
         // Load saved config (ordered list of enabled IDs)
         val configJson = prefs.getString("radial_menu_config", null)
@@ -688,11 +1015,18 @@ class MainActivity : AppCompatActivity() {
         // Map id -> def
         val defMap = allItems.associateBy { it.id }
 
+        // Custom item IDs for showing delete button
+        val customIds = com.example.voicelistener.services.OverlayService.getCustomRadialItems(this).map { it.id }.toSet()
+        // Group IDs for showing edit/delete buttons
+        val groupIds = com.example.voicelistener.services.OverlayService.getRadialGroups(this).map { it.id }.toSet()
+
         fun saveConfig() {
             val enabled = orderedIds.filter { it in enabledSet }
             val json = org.json.JSONArray(enabled)
             prefs.edit().putString("radial_menu_config", json.toString()).apply()
         }
+
+        var dragSourceId: String? = null
 
         fun rebuildList() {
             container.removeAllViews()
@@ -703,10 +1037,30 @@ class MainActivity : AppCompatActivity() {
                     orientation = android.widget.LinearLayout.HORIZONTAL
                     gravity = android.view.Gravity.CENTER_VERTICAL
                     setPadding(0, (2 * density).toInt(), 0, (2 * density).toInt())
+                    tag = id
                 }
 
+                // Drag handle
+                val dragHandle = android.widget.TextView(this).apply {
+                    text = "\u2630" // hamburger icon
+                    textSize = 18f
+                    setPadding((4 * density).toInt(), (4 * density).toInt(), (8 * density).toInt(), (4 * density).toInt())
+                    setOnTouchListener { v, event ->
+                        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+                            dragSourceId = id
+                            val dragData = android.content.ClipData.newPlainText("radial_id", id)
+                            val shadow = View.DragShadowBuilder(row)
+                            row.startDragAndDrop(dragData, shadow, null, 0)
+                            true
+                        } else false
+                    }
+                }
+                row.addView(dragHandle)
+
+                val override = com.example.voicelistener.services.OverlayService.getItemAppearance(this, id)
+                val displayIcon = override?.icon ?: def.icon
                 val cb = CheckBox(this).apply {
-                    text = "${def.icon}  ${def.label}"
+                    text = "${displayIcon}  ${def.label}"
                     isChecked = id in enabledSet
                     layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                     setOnCheckedChangeListener { _, checked ->
@@ -716,49 +1070,829 @@ class MainActivity : AppCompatActivity() {
                 }
                 row.addView(cb)
 
-                // Up button
-                if (index > 0) {
-                    val upBtn = android.widget.TextView(this).apply {
-                        text = "\u25B2"
-                        textSize = 16f
-                        setPadding((12 * density).toInt(), 0, (4 * density).toInt(), 0)
-                        setOnClickListener {
-                            val pos = orderedIds.indexOf(id)
-                            if (pos > 0) {
-                                orderedIds.removeAt(pos)
-                                orderedIds.add(pos - 1, id)
-                                saveConfig()
-                                rebuildList()
-                            }
+                // Edit appearance button for ALL items
+                val appearBtn = android.widget.TextView(this).apply {
+                    text = "\uD83C\uDFA8" // palette icon
+                    textSize = 14f
+                    setPadding((6 * density).toInt(), 0, (4 * density).toInt(), 0)
+                    setOnClickListener {
+                        showEditItemAppearanceDialog(prefs, id, def) {
+                            setupRadialMenuConfig(prefs)
                         }
                     }
-                    row.addView(upBtn)
+                }
+                row.addView(appearBtn)
+
+                // Edit/Delete buttons for groups
+                if (id in groupIds) {
+                    val editBtn = android.widget.TextView(this).apply {
+                        text = "\u270E"
+                        textSize = 16f
+                        setPadding((8 * density).toInt(), 0, (4 * density).toInt(), 0)
+                        setOnClickListener { showEditGroupDialog(prefs, id) }
+                    }
+                    row.addView(editBtn)
+                    val delBtn = android.widget.TextView(this).apply {
+                        text = "\u2716"
+                        textSize = 16f
+                        setTextColor(android.graphics.Color.parseColor("#F44336"))
+                        setPadding((4 * density).toInt(), 0, (4 * density).toInt(), 0)
+                        setOnClickListener {
+                            com.example.voicelistener.services.OverlayService.removeRadialGroup(this@MainActivity, id)
+                            enabledSet.remove(id)
+                            orderedIds.remove(id)
+                            saveConfig()
+                            setupRadialMenuConfig(prefs)
+                        }
+                    }
+                    row.addView(delBtn)
                 }
 
-                // Down button
-                if (index < orderedIds.size - 1) {
-                    val downBtn = android.widget.TextView(this).apply {
-                        text = "\u25BC"
+                // Delete button for custom items
+                if (id in customIds) {
+                    val delBtn = android.widget.TextView(this).apply {
+                        text = "\u2716"
                         textSize = 16f
-                        setPadding((4 * density).toInt(), 0, (8 * density).toInt(), 0)
+                        setTextColor(android.graphics.Color.parseColor("#F44336"))
+                        setPadding((8 * density).toInt(), 0, (4 * density).toInt(), 0)
                         setOnClickListener {
-                            val pos = orderedIds.indexOf(id)
-                            if (pos < orderedIds.size - 1) {
-                                orderedIds.removeAt(pos)
-                                orderedIds.add(pos + 1, id)
-                                saveConfig()
-                                rebuildList()
-                            }
+                            com.example.voicelistener.services.OverlayService.removeCustomItem(this@MainActivity, id)
+                            enabledSet.remove(id)
+                            orderedIds.remove(id)
+                            saveConfig()
+                            setupRadialMenuConfig(prefs) // full rebuild
                         }
                     }
-                    row.addView(downBtn)
+                    row.addView(delBtn)
+                }
+
+                // Drop target per row
+                row.setOnDragListener { v, event ->
+                    when (event.action) {
+                        android.view.DragEvent.ACTION_DRAG_ENTERED -> {
+                            v.setBackgroundColor(android.graphics.Color.parseColor("#1A2196F3"))
+                            true
+                        }
+                        android.view.DragEvent.ACTION_DRAG_EXITED -> {
+                            v.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            true
+                        }
+                        android.view.DragEvent.ACTION_DROP -> {
+                            v.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            val targetId = v.tag as? String ?: return@setOnDragListener false
+                            val srcId = dragSourceId ?: return@setOnDragListener false
+                            if (srcId != targetId) {
+                                val fromIdx = orderedIds.indexOf(srcId)
+                                val toIdx = orderedIds.indexOf(targetId)
+                                if (fromIdx >= 0 && toIdx >= 0) {
+                                    orderedIds.removeAt(fromIdx)
+                                    orderedIds.add(toIdx, srcId)
+                                    saveConfig()
+                                    rebuildList()
+                                }
+                            }
+                            true
+                        }
+                        android.view.DragEvent.ACTION_DRAG_ENDED -> {
+                            v.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            true
+                        }
+                        else -> true
+                    }
                 }
 
                 container.addView(row)
             }
+
+            // Buttons at the bottom
+            val btnRow = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+            }
+            val addBtn = android.widget.Button(this).apply {
+                text = "+ Eintrag"
+                layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { showAddRadialItemDialog(prefs) }
+            }
+            btnRow.addView(addBtn)
+            val addGroupBtn = android.widget.Button(this).apply {
+                text = "+ Gruppe"
+                layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { showAddGroupDialog(prefs) }
+            }
+            btnRow.addView(addGroupBtn)
+            container.addView(btnRow)
         }
 
         rebuildList()
+    }
+
+    private fun showAddRadialItemDialog(prefs: android.content.SharedPreferences) {
+        val density = resources.displayMetrics.density
+
+        // All available functions to choose from
+        val functions = linkedMapOf(
+            "translate_es" to "ES - Spanisch",
+            "translate_en" to "EN - Englisch",
+            "translate_de" to "DE - Deutsch",
+            "translator" to "Uebersetzen",
+            "clipboard" to "Clipboard",
+            "market" to "Markt",
+            "ask_llama" to "Llama",
+            "settings_ai" to "AI Settings",
+            "fix_text" to "Fix Text",
+            "timeout" to "Timeout",
+            "settings" to "Settings"
+        )
+        // Add Tasker tasks
+        val taskerTasks = TaskerHelper.getTasks(this)
+        for (task in taskerTasks) {
+            functions[TaskerHelper.actionIdForTask(task)] = "Tasker: ${task.name}"
+        }
+
+        val functionIds = functions.keys.toList()
+        val functionLabels = functions.values.toList()
+
+        val layout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding((16 * density).toInt(), (16 * density).toInt(), (16 * density).toInt(), (8 * density).toInt())
+        }
+
+        val nameLabel = android.widget.TextView(this).apply { text = "Name:" }
+        layout.addView(nameLabel)
+        val nameInput = android.widget.EditText(this).apply { hint = "Button-Name" }
+        layout.addView(nameInput)
+
+        val funcLabel = android.widget.TextView(this).apply {
+            text = "Funktion:"
+            setPadding(0, (12 * density).toInt(), 0, 0)
+        }
+        layout.addView(funcLabel)
+        val spinner = android.widget.Spinner(this)
+        spinner.adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, functionLabels)
+        layout.addView(spinner)
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Neuer Radial-Men\u00fc Eintrag")
+            .setView(layout)
+            .setPositiveButton("Hinzuf\u00fcgen") { _, _ ->
+                val name = nameInput.text.toString().trim()
+                if (name.isEmpty()) {
+                    Toast.makeText(this, "Name darf nicht leer sein", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val selectedIdx = spinner.selectedItemPosition
+                val actionId = functionIds[selectedIdx]
+
+                // Find icon and color from the source action
+                val sourceItem = com.example.voicelistener.services.OverlayService.ALL_RADIAL_ITEMS.find { it.id == actionId }
+                val icon = sourceItem?.icon ?: "\u2B50"
+                val color = sourceItem?.defaultColor ?: "#FF9800"
+
+                val customId = "custom_${System.currentTimeMillis()}"
+                com.example.voicelistener.services.OverlayService.saveCustomItem(this, customId, name, actionId, icon, color)
+
+                // Add to radial menu config as enabled
+                val configJson = prefs.getString("radial_menu_config", null)
+                if (configJson != null) {
+                    try {
+                        val arr = org.json.JSONArray(configJson)
+                        arr.put(customId)
+                        prefs.edit().putString("radial_menu_config", arr.toString()).apply()
+                    } catch (_: Exception) {}
+                }
+
+                setupRadialMenuConfig(prefs) // full rebuild
+                Toast.makeText(this, "'$name' hinzugef\u00fcgt", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Abbrechen", null)
+            .show()
+    }
+
+    /** Helper: returns all assignable action IDs and labels */
+    private fun getAvailableFunctions(excludeGroupId: String? = null): LinkedHashMap<String, String> {
+        val functions = linkedMapOf(
+            "translate_es" to "ES - Spanisch",
+            "translate_en" to "EN - Englisch",
+            "translate_de" to "DE - Deutsch",
+            "translator" to "Uebersetzen",
+            "clipboard" to "Clipboard",
+            "market" to "Markt",
+            "ask_llama" to "Llama",
+            "settings_ai" to "AI Settings",
+            "fix_text" to "Fix Text",
+            "timeout" to "Timeout",
+            "settings" to "Settings"
+        )
+        val taskerTasks = TaskerHelper.getTasks(this)
+        for (task in taskerTasks) {
+            functions[TaskerHelper.actionIdForTask(task)] = "Tasker: ${task.name}"
+        }
+        // Add other groups as possible children (for nested sub-menus)
+        val groups = com.example.voicelistener.services.OverlayService.getRadialGroups(this)
+        for (group in groups) {
+            if (group.id != excludeGroupId) {
+                functions[group.id] = "Gruppe: ${group.label}"
+            }
+        }
+        return functions
+    }
+
+    private val colorOptions = listOf(
+        "#E91E63", "#2196F3", "#FF9800", "#4CAF50", "#9C27B0",
+        "#00BCD4", "#FF5722", "#607D8B", "#795548", "#6200EE"
+    )
+
+    private val emojiOptions = listOf(
+        "\uD83D\uDCC2", "\u2B50", "\uD83D\uDD25", "\u26A1", "\uD83C\uDFAF",
+        "\uD83D\uDE80", "\uD83D\uDCAC", "\uD83C\uDFA8", "\uD83D\uDD27", "\uD83C\uDF10",
+        "\uD83D\uDCCA", "\uD83D\uDD12", "\uD83C\uDFB5", "\u2764", "\uD83D\uDCA1",
+        "\uD83D\uDCF1", "\uD83C\uDFAE", "\uD83D\uDCE7", "\uD83D\uDCC5", "\u2699"
+    )
+
+    private fun showEditItemAppearanceDialog(
+        prefs: android.content.SharedPreferences,
+        itemId: String,
+        def: com.example.voicelistener.services.OverlayService.RadialItemDef,
+        onSaved: () -> Unit
+    ) {
+        val density = resources.displayMetrics.density
+        val existing = com.example.voicelistener.services.OverlayService.getItemAppearance(this, itemId)
+
+        val scrollView = ScrollView(this)
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((16 * density).toInt(), (16 * density).toInt(), (16 * density).toInt(), (8 * density).toInt())
+        }
+        scrollView.addView(layout)
+
+        val infoLabel = TextView(this).apply {
+            text = "Darstellung von: ${def.label}"
+            textSize = 14f
+            setPadding(0, 0, 0, (8 * density).toInt())
+        }
+        layout.addView(infoLabel)
+
+        var selectedIconType = existing?.iconType ?: "emoji"
+        var selectedIcon = existing?.icon ?: def.icon
+        var selectedIconUri = existing?.iconUri
+        var selectedColor = existing?.color ?: def.defaultColor
+
+        // Preview
+        val previewLabel = TextView(this).apply {
+            text = "Vorschau:"
+            setPadding(0, (8 * density).toInt(), 0, (4 * density).toInt())
+        }
+        layout.addView(previewLabel)
+        val iconPreview = TextView(this).apply {
+            text = if (selectedIconType == "text") "[$selectedIcon]"
+                   else if (selectedIconType == "gallery") "\uD83D\uDDBC (Bild)"
+                   else selectedIcon
+            textSize = 28f
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, 0, 0, (8 * density).toInt())
+        }
+        layout.addView(iconPreview)
+
+        // Type toggle
+        val typeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, (4 * density).toInt(), 0, (8 * density).toInt())
+        }
+        val emojiToggle = android.widget.Button(this).apply {
+            text = "Emoji"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val textToggle = android.widget.Button(this).apply {
+            text = "Text"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val galleryToggle = android.widget.Button(this).apply {
+            text = "Bild"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        typeRow.addView(emojiToggle)
+        typeRow.addView(textToggle)
+        typeRow.addView(galleryToggle)
+        layout.addView(typeRow)
+
+        // Emoji grid
+        val emojiGrid = android.widget.GridLayout(this).apply { columnCount = 5 }
+        for (emoji in emojiOptions) {
+            val btn = TextView(this).apply {
+                text = emoji
+                textSize = 22f
+                gravity = android.view.Gravity.CENTER
+                setPadding((8 * density).toInt(), (4 * density).toInt(), (8 * density).toInt(), (4 * density).toInt())
+                setOnClickListener {
+                    selectedIcon = emoji; selectedIconType = "emoji"; selectedIconUri = null
+                    iconPreview.text = emoji
+                }
+            }
+            emojiGrid.addView(btn)
+        }
+        layout.addView(emojiGrid)
+
+        // Text input
+        val textInput = EditText(this).apply {
+            hint = "Kurztext (max 5 Zeichen)"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(5))
+            if (selectedIconType == "text") setText(selectedIcon)
+            visibility = if (selectedIconType == "text") View.VISIBLE else View.GONE
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    val t = s?.toString()?.trim() ?: ""
+                    if (t.isNotEmpty()) {
+                        selectedIcon = t; selectedIconType = "text"; selectedIconUri = null
+                        iconPreview.text = "[$t]"
+                    }
+                }
+            })
+        }
+        layout.addView(textInput)
+
+        fun updateTypeUI(type: String) {
+            emojiGrid.visibility = if (type == "emoji") View.VISIBLE else View.GONE
+            textInput.visibility = if (type == "text") View.VISIBLE else View.GONE
+        }
+        updateTypeUI(selectedIconType)
+
+        emojiToggle.setOnClickListener { selectedIconType = "emoji"; updateTypeUI("emoji") }
+        textToggle.setOnClickListener {
+            selectedIconType = "text"; updateTypeUI("text")
+            val t = textInput.text.toString().trim()
+            if (t.isNotEmpty()) { selectedIcon = t; selectedIconUri = null; iconPreview.text = "[$t]" }
+        }
+        galleryToggle.setOnClickListener {
+            pendingGroupIconCallback = { uri ->
+                selectedIconType = "gallery"; selectedIconUri = uri.toString()
+                selectedIcon = "\uD83D\uDDBC"; iconPreview.text = "\uD83D\uDDBC (Bild)"
+                updateTypeUI("gallery")
+            }
+            groupIconPickerLauncher.launch("image/*")
+        }
+
+        // Color selection
+        val colorLabel = TextView(this).apply {
+            text = "Farbe:"
+            setPadding(0, (12 * density).toInt(), 0, (4 * density).toInt())
+        }
+        layout.addView(colorLabel)
+
+        val colorPreview = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams((32 * density).toInt(), (32 * density).toInt()).apply {
+                bottomMargin = (4 * density).toInt()
+            }
+            setBackgroundColor(android.graphics.Color.parseColor(selectedColor))
+        }
+        layout.addView(colorPreview)
+
+        val colorRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (color in colorOptions) {
+            val swatch = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams((28 * density).toInt(), (28 * density).toInt()).apply {
+                    setMargins((2 * density).toInt(), 0, (2 * density).toInt(), 0)
+                }
+                setBackgroundColor(android.graphics.Color.parseColor(color))
+                setOnClickListener {
+                    selectedColor = color
+                    colorPreview.setBackgroundColor(android.graphics.Color.parseColor(color))
+                }
+            }
+            colorRow.addView(swatch)
+        }
+        layout.addView(colorRow)
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Button-Darstellung")
+            .setView(scrollView)
+            .setPositiveButton("Speichern") { _, _ ->
+                val appearance = com.example.voicelistener.services.OverlayService.ItemAppearance(
+                    iconType = selectedIconType,
+                    icon = selectedIcon,
+                    iconUri = selectedIconUri,
+                    color = selectedColor
+                )
+                com.example.voicelistener.services.OverlayService.saveItemAppearance(this, itemId, appearance)
+                onSaved()
+            }
+            .setNeutralButton("Zuruecksetzen") { _, _ ->
+                com.example.voicelistener.services.OverlayService.removeItemAppearance(this, itemId)
+                onSaved()
+            }
+            .setNegativeButton("Abbrechen", null)
+            .show()
+    }
+
+    private fun showAddGroupDialog(prefs: android.content.SharedPreferences) {
+        showGroupDialog(prefs, null, null)
+    }
+
+    private fun showAddSubGroupDialog(prefs: android.content.SharedPreferences, onCreated: (String) -> Unit) {
+        showGroupDialog(prefs, null, onCreated)
+    }
+
+    private fun showEditGroupDialog(prefs: android.content.SharedPreferences, groupId: String) {
+        showGroupDialog(prefs, groupId, null)
+    }
+
+    /**
+     * @param onCreatedAsChild If non-null, the new group is NOT added to the main radial_menu_config.
+     *                         Instead, the callback receives the new group ID so the caller can add it as a child.
+     */
+    private fun showGroupDialog(prefs: android.content.SharedPreferences, editGroupId: String?, onCreatedAsChild: ((String) -> Unit)?) {
+        val density = resources.displayMetrics.density
+        val isEdit = editGroupId != null
+        val existingGroup = if (isEdit) {
+            com.example.voicelistener.services.OverlayService.getRadialGroups(this).find { it.id == editGroupId }
+        } else null
+
+        val functions = getAvailableFunctions(excludeGroupId = editGroupId)
+        val functionIds = functions.keys.toList()
+        val functionLabels = functions.values.toList()
+
+        val scrollView = ScrollView(this)
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((16 * density).toInt(), (16 * density).toInt(), (16 * density).toInt(), (8 * density).toInt())
+        }
+        scrollView.addView(layout)
+
+        // Name
+        val nameLabel = TextView(this).apply { text = "Gruppen-Name:" }
+        layout.addView(nameLabel)
+        val nameInput = EditText(this).apply {
+            hint = "z.B. Sprachen, Tools, ..."
+            if (existingGroup != null) setText(existingGroup.label)
+        }
+        layout.addView(nameInput)
+
+        // Icon selection
+        val iconLabel = TextView(this).apply {
+            text = "Icon:"
+            setPadding(0, (12 * density).toInt(), 0, (4 * density).toInt())
+        }
+        layout.addView(iconLabel)
+
+        var selectedIcon = existingGroup?.icon ?: "\uD83D\uDCC2"
+        var selectedIconType = existingGroup?.iconType ?: "emoji"
+        var selectedIconUri: String? = existingGroup?.iconUri
+
+        val iconPreview = TextView(this).apply {
+            text = if (selectedIconType == "text") "[$selectedIcon]" else selectedIcon
+            textSize = 28f
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, 0, 0, (4 * density).toInt())
+        }
+        layout.addView(iconPreview)
+
+        // Icon type toggle: Emoji / Text / Galerie
+        val iconTypeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, (4 * density).toInt(), 0, (8 * density).toInt())
+        }
+        val emojiToggle = android.widget.Button(this).apply {
+            text = "Emoji"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val textToggle = android.widget.Button(this).apply {
+            text = "Text"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val galleryToggle = android.widget.Button(this).apply {
+            text = "Bild"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        iconTypeRow.addView(emojiToggle)
+        iconTypeRow.addView(textToggle)
+        iconTypeRow.addView(galleryToggle)
+        layout.addView(iconTypeRow)
+
+        // Emoji grid
+        val emojiGrid = android.widget.GridLayout(this).apply {
+            columnCount = 5
+        }
+        for (emoji in emojiOptions) {
+            val emojiBtn = TextView(this).apply {
+                text = emoji
+                textSize = 22f
+                gravity = android.view.Gravity.CENTER
+                setPadding((8 * density).toInt(), (4 * density).toInt(), (8 * density).toInt(), (4 * density).toInt())
+                setOnClickListener {
+                    selectedIcon = emoji
+                    selectedIconType = "emoji"
+                    selectedIconUri = null
+                    iconPreview.text = emoji
+                }
+            }
+            emojiGrid.addView(emojiBtn)
+        }
+        layout.addView(emojiGrid)
+
+        // Text input for custom text icon
+        val textIconInput = EditText(this).apply {
+            hint = "Kurztext (max 5 Zeichen)"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(5))
+            if (selectedIconType == "text") setText(selectedIcon)
+            visibility = if (selectedIconType == "text") View.VISIBLE else View.GONE
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    val t = s?.toString()?.trim() ?: ""
+                    if (t.isNotEmpty()) {
+                        selectedIcon = t
+                        selectedIconType = "text"
+                        selectedIconUri = null
+                        iconPreview.text = "[$t]"
+                    }
+                }
+            })
+        }
+        layout.addView(textIconInput)
+
+        // Toggle visibility based on icon type
+        fun updateIconTypeUI(type: String) {
+            emojiGrid.visibility = if (type == "emoji") View.VISIBLE else View.GONE
+            textIconInput.visibility = if (type == "text") View.VISIBLE else View.GONE
+        }
+        updateIconTypeUI(selectedIconType)
+
+        emojiToggle.setOnClickListener {
+            selectedIconType = "emoji"
+            updateIconTypeUI("emoji")
+        }
+        textToggle.setOnClickListener {
+            selectedIconType = "text"
+            updateIconTypeUI("text")
+            val t = textIconInput.text.toString().trim()
+            if (t.isNotEmpty()) {
+                selectedIcon = t
+                selectedIconUri = null
+                iconPreview.text = "[$t]"
+            }
+        }
+        galleryToggle.setOnClickListener {
+            pendingGroupIconCallback = { uri ->
+                selectedIconType = "gallery"
+                selectedIconUri = uri.toString()
+                selectedIcon = "\uD83D\uDDBC"
+                iconPreview.text = "\uD83D\uDDBC (Bild)"
+                updateIconTypeUI("gallery")
+            }
+            groupIconPickerLauncher.launch("image/*")
+        }
+
+        // Color selection
+        val colorLabel = TextView(this).apply {
+            text = "Farbe:"
+            setPadding(0, (12 * density).toInt(), 0, (4 * density).toInt())
+        }
+        layout.addView(colorLabel)
+
+        var selectedColor = existingGroup?.color ?: "#9C27B0"
+        val colorPreview = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams((32 * density).toInt(), (32 * density).toInt()).apply {
+                bottomMargin = (4 * density).toInt()
+            }
+            setBackgroundColor(android.graphics.Color.parseColor(selectedColor))
+        }
+        layout.addView(colorPreview)
+
+        val colorRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        for (color in colorOptions) {
+            val swatch = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams((28 * density).toInt(), (28 * density).toInt()).apply {
+                    setMargins((2 * density).toInt(), 0, (2 * density).toInt(), 0)
+                }
+                setBackgroundColor(android.graphics.Color.parseColor(color))
+                setOnClickListener {
+                    selectedColor = color
+                    colorPreview.setBackgroundColor(android.graphics.Color.parseColor(color))
+                }
+            }
+            colorRow.addView(swatch)
+        }
+        layout.addView(colorRow)
+
+        // Child items - full management like the main radial menu config
+        val childLabel = TextView(this).apply {
+            text = "Funktionen in dieser Gruppe:"
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, (16 * density).toInt(), 0, (4 * density).toInt())
+        }
+        layout.addView(childLabel)
+
+        val allItemDefs = com.example.voicelistener.services.OverlayService.getAllRadialItems(this)
+        val itemDefMap = allItemDefs.associateBy { it.id }
+        val childGroupIds = com.example.voicelistener.services.OverlayService.getRadialGroups(this)
+            .map { it.id }.filter { it != editGroupId }.toSet()
+
+        // Ordered list: saved children first, then remaining available items
+        val savedChildren = (existingGroup?.children ?: emptyList()).toMutableList()
+        val orderedChildIds = mutableListOf<String>()
+        for (id in savedChildren) { if (id in functionIds.toSet()) orderedChildIds.add(id) }
+        for (id in functionIds) { if (id !in orderedChildIds) orderedChildIds.add(id) }
+
+        val enabledChildSet = savedChildren.toMutableSet()
+
+        val childContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        layout.addView(childContainer)
+
+        var childDragSourceId: String? = null
+
+        fun rebuildChildList() {
+            childContainer.removeAllViews()
+            for (id in orderedChildIds) {
+                val funcLabel = functions[id] ?: continue
+                val itemDef = itemDefMap[id]
+                val override = com.example.voicelistener.services.OverlayService.getItemAppearance(this, id)
+                val displayIcon = override?.icon ?: itemDef?.icon ?: ""
+
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(0, (2 * density).toInt(), 0, (2 * density).toInt())
+                    tag = id
+                }
+
+                // Drag handle
+                val dragHandle = TextView(this).apply {
+                    text = "\u2630"
+                    textSize = 16f
+                    setPadding((4 * density).toInt(), (4 * density).toInt(), (6 * density).toInt(), (4 * density).toInt())
+                    setOnTouchListener { _, event ->
+                        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+                            childDragSourceId = id
+                            val dragData = android.content.ClipData.newPlainText("child_id", id)
+                            row.startDragAndDrop(dragData, View.DragShadowBuilder(row), null, 0)
+                            true
+                        } else false
+                    }
+                }
+                row.addView(dragHandle)
+
+                // Checkbox
+                val cb = CheckBox(this).apply {
+                    text = if (displayIcon.isNotEmpty()) "$displayIcon  $funcLabel" else funcLabel
+                    isChecked = id in enabledChildSet
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    setOnCheckedChangeListener { _, checked ->
+                        if (checked) enabledChildSet.add(id) else enabledChildSet.remove(id)
+                    }
+                }
+                row.addView(cb)
+
+                // Palette button
+                if (itemDef != null) {
+                    val paletteBtn = TextView(this).apply {
+                        text = "\uD83C\uDFA8"
+                        textSize = 14f
+                        setPadding((6 * density).toInt(), 0, (4 * density).toInt(), 0)
+                        setOnClickListener {
+                            showEditItemAppearanceDialog(prefs, id, itemDef) {
+                                rebuildChildList()
+                            }
+                        }
+                    }
+                    row.addView(paletteBtn)
+                }
+
+                // Edit/Delete for sub-groups within this group
+                if (id in childGroupIds) {
+                    val editBtn = TextView(this).apply {
+                        text = "\u270E"
+                        textSize = 14f
+                        setPadding((4 * density).toInt(), 0, (4 * density).toInt(), 0)
+                        setOnClickListener { showEditGroupDialog(prefs, id) }
+                    }
+                    row.addView(editBtn)
+                }
+
+                // Drop target
+                row.setOnDragListener { v, event ->
+                    when (event.action) {
+                        android.view.DragEvent.ACTION_DRAG_ENTERED -> {
+                            v.setBackgroundColor(android.graphics.Color.parseColor("#1A2196F3")); true
+                        }
+                        android.view.DragEvent.ACTION_DRAG_EXITED -> {
+                            v.setBackgroundColor(android.graphics.Color.TRANSPARENT); true
+                        }
+                        android.view.DragEvent.ACTION_DROP -> {
+                            v.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            val targetId = v.tag as? String ?: return@setOnDragListener false
+                            val srcId = childDragSourceId ?: return@setOnDragListener false
+                            if (srcId != targetId) {
+                                val fromIdx = orderedChildIds.indexOf(srcId)
+                                val toIdx = orderedChildIds.indexOf(targetId)
+                                if (fromIdx >= 0 && toIdx >= 0) {
+                                    orderedChildIds.removeAt(fromIdx)
+                                    orderedChildIds.add(toIdx, srcId)
+                                    rebuildChildList()
+                                }
+                            }
+                            true
+                        }
+                        android.view.DragEvent.ACTION_DRAG_ENDED -> {
+                            v.setBackgroundColor(android.graphics.Color.TRANSPARENT); true
+                        }
+                        else -> true
+                    }
+                }
+
+                childContainer.addView(row)
+            }
+        }
+        rebuildChildList()
+
+        // Button row: + Eintrag, + Gruppe
+        val childBtnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, (8 * density).toInt(), 0, 0)
+        }
+        val addSubGroupBtn = android.widget.Button(this).apply {
+            text = "+ Untergruppe"
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            setOnClickListener {
+                showAddSubGroupDialog(prefs) { newGroupId ->
+                    // Add the new sub-group directly as child of this group
+                    val newGroup = com.example.voicelistener.services.OverlayService.getRadialGroups(this@MainActivity)
+                        .find { it.id == newGroupId }
+                    if (newGroup != null) {
+                        functions[newGroupId] = "Gruppe: ${newGroup.label}"
+                        val newDef = com.example.voicelistener.services.OverlayService.RadialItemDef(
+                            newGroupId, newGroup.icon, newGroup.label, newGroup.color
+                        )
+                        orderedChildIds.add(newGroupId)
+                        enabledChildSet.add(newGroupId)
+                        rebuildChildList()
+                    }
+                }
+            }
+        }
+        childBtnRow.addView(addSubGroupBtn)
+        layout.addView(childBtnRow)
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle(if (isEdit) "Gruppe bearbeiten" else "Neue Gruppe")
+            .setView(scrollView)
+            .setPositiveButton(if (isEdit) "Speichern" else "Erstellen") { _, _ ->
+                val name = nameInput.text.toString().trim()
+                if (name.isEmpty()) {
+                    Toast.makeText(this, "Name darf nicht leer sein", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val finalChildren = orderedChildIds.filter { it in enabledChildSet }
+                if (finalChildren.isEmpty()) {
+                    Toast.makeText(this, "Mindestens eine Funktion auswaehlen", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
+                val groupId = editGroupId ?: "group_${System.currentTimeMillis()}"
+                val group = com.example.voicelistener.services.OverlayService.Companion.RadialGroupDef(
+                    id = groupId,
+                    label = name,
+                    icon = selectedIcon,
+                    color = selectedColor,
+                    iconType = selectedIconType,
+                    iconUri = selectedIconUri,
+                    children = finalChildren
+                )
+                com.example.voicelistener.services.OverlayService.saveRadialGroup(this, group)
+
+                if (onCreatedAsChild != null && !isEdit) {
+                    // Created as sub-group: callback to parent, do NOT add to main config
+                    onCreatedAsChild.invoke(groupId)
+                } else {
+                    // Add to radial menu config if new top-level group
+                    if (!isEdit) {
+                        val configJson = prefs.getString("radial_menu_config", null)
+                        if (configJson != null) {
+                            try {
+                                val arr = org.json.JSONArray(configJson)
+                                arr.put(groupId)
+                                prefs.edit().putString("radial_menu_config", arr.toString()).apply()
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    setupRadialMenuConfig(prefs)
+                }
+
+                Toast.makeText(this, if (isEdit) "'$name' gespeichert" else "'$name' erstellt", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Abbrechen", null)
+            .show()
     }
 
     private fun updateMarketKeysDisplay(display: TextView, prefs: android.content.SharedPreferences) {
@@ -844,7 +1978,7 @@ class MainActivity : AppCompatActivity() {
                 gravity = android.view.Gravity.CENTER_VERTICAL
                 setPadding(0, 4, 0, 4)
             }
-            val funcMap = com.example.voicelistener.services.VoiceAccessibilityService.FUNCTION_REPLACEMENTS
+            val funcMap = com.example.voicelistener.services.VoiceAccessibilityService.getAllFunctionReplacements(this)
             val displayReplacement = funcMap[replacement] ?: replacement
             val label = TextView(this).apply {
                 text = "$trigger → $displayReplacement"
@@ -938,7 +2072,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAddFunctionRuleDialog() {
-        val functions = com.example.voicelistener.services.VoiceAccessibilityService.FUNCTION_REPLACEMENTS
+        val functions = com.example.voicelistener.services.VoiceAccessibilityService.getAllFunctionReplacements(this)
         val tokens = functions.keys.toList()
         val labels = functions.values.toTypedArray()
 
@@ -997,11 +2131,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showEditExpansionRuleDialog(index: Int, currentTrigger: String, currentReplacement: String, currentCaseSensitive: Boolean = false) {
-        val funcMap = com.example.voicelistener.services.VoiceAccessibilityService.FUNCTION_REPLACEMENTS
+        val funcMap = com.example.voicelistener.services.VoiceAccessibilityService.getAllFunctionReplacements(this)
         val isFunction = funcMap.containsKey(currentReplacement)
 
         if (isFunction) {
-            val functions = com.example.voicelistener.services.VoiceAccessibilityService.FUNCTION_REPLACEMENTS
+            val functions = com.example.voicelistener.services.VoiceAccessibilityService.getAllFunctionReplacements(this)
             val tokens = functions.keys.toList()
             val labels = functions.values.toTypedArray()
             val currentIdx = tokens.indexOf(currentReplacement).coerceAtLeast(0)

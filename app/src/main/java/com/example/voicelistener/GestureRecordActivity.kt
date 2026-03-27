@@ -28,7 +28,7 @@ class GestureRecordActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         gestureManager = GestureManager(this)
 
-        val actions = GestureManager.ACTION_LABELS.entries.toList()
+        val actions = GestureManager.getAllActionLabels(this).entries.toList()
 
         // Outer layout: top controls, gesture area (takes remaining space), bottom controls
         val outer = LinearLayout(this).apply {
@@ -150,7 +150,7 @@ class GestureRecordActivity : AppCompatActivity() {
 
             for (name in existingNames) {
                 val action = gestureManager.getActionForGesture(name) ?: "?"
-                val label = GestureManager.ACTION_LABELS[action] ?: action
+                val label = GestureManager.getAllActionLabels(this@GestureRecordActivity)[action] ?: action
                 val gesture = gestureManager.getGesture(name)
 
                 val row = LinearLayout(this).apply {

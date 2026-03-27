@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_general"
+        android:icon="@android:drawable/ic_menu_preferences"
+        android:title="Allgemein"/>
+    <item
+        android:id="@+id/nav_button"
+        android:icon="@android:drawable/ic_menu_view"
+        android:title="Button"/>
+    <item
+        android:id="@+id/nav_gestures"
+        android:icon="@android:drawable/ic_menu_directions"
+        android:title="Gesten"/>
+    <item
+        android:id="@+id/nav_radial"
+        android:icon="@android:drawable/ic_menu_rotate"
+        android:title="Radial-Menü"/>
+    <item
+        android:id="@+id/nav_market"
+        android:icon="@android:drawable/ic_menu_sort_by_size"
+        android:title="Marktdaten"/>
+    <item
+        android:id="@+id/nav_textexpansion"
+        android:icon="@android:drawable/ic_menu_edit"
+        android:title="Textbausteine"/>
+    <item
+        android:id="@+id/nav_tasker"
+        android:icon="@android:drawable/ic_menu_send"
+        android:title="Tasker"/>
+    <item
+        android:id="@+id/nav_system"
+        android:icon="@android:drawable/ic_menu_manage"
+        android:title="System"/>
+</menu>

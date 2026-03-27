@@ -34,6 +34,13 @@ class GestureManager(private val context: Context) {
             "toggle_ask_llama" to "AskLlama umschalten",
             "open_settings" to "Einstellungen öffnen"
         )
+
+        /** Returns all actions including dynamic Tasker tasks */
+        fun getAllActionLabels(context: Context): LinkedHashMap<String, String> {
+            val all = LinkedHashMap(ACTION_LABELS)
+            all.putAll(TaskerHelper.getActionLabels(context))
+            return all
+        }
     }
 
     init {

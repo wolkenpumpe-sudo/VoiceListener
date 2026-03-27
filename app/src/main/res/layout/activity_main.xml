@@ -1,707 +1,669 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.drawerlayout.widget.DrawerLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/drawerLayout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:fillViewport="true"
-    android:scrollbars="vertical"
-    android:scrollbarStyle="outsideOverlay">
+    android:layout_height="match_parent">
 
+    <!-- Main Content -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:gravity="center_horizontal"
-        android:padding="16dp"
-        android:paddingBottom="100dp">
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Voice Listener Config"
-            android:textSize="24sp"
-            android:layout_marginBottom="16dp"/>
-
-        <Button
-            android:id="@+id/saveButtonTop"
+        <!-- Toolbar -->
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Save &amp; Start"
-            android:backgroundTint="#4CAF50"
-            android:textColor="#FFFFFF"
-            android:layout_marginBottom="8dp"/>
+            android:minHeight="?attr/actionBarSize"
+            android:background="#6200EE"
+            android:elevation="4dp"
+            app:contentInsetStartWithNavigation="0dp"
+            app:contentInsetStart="0dp">
 
-        <Button
-            android:id="@+id/helpButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Anleitung &amp; Hilfe"
-            android:backgroundTint="#009688"
-            android:layout_marginBottom="16dp"/>
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Groq API Key">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/apiKeyInput"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="textPassword"/>
-        </com.google.android.material.textfield.TextInputLayout>
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="4dp"
+                android:paddingEnd="8dp">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginTop="8dp">
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="LLM Modell:"
-                android:textSize="14sp"
-                android:paddingEnd="8dp"/>
-            <Spinner
-                android:id="@+id/llmModelSpinner"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"/>
-        </LinearLayout>
+                <!-- Menu Button -->
+                <LinearLayout
+                    android:id="@+id/toolbarMenuButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:clickable="true"
+                    android:focusable="true">
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:hint="EQS Server URL (z.B. https://eqs.example.com)">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/eqsServerUrlInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="textUri"/>
-        </com.google.android.material.textfield.TextInputLayout>
+                    <ImageView
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:src="@drawable/ic_menu_circle"
+                        android:contentDescription="Menü öffnen"/>
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="16dp">
-            <TextView
-                android:id="@+id/sizeLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Button Größe: 100%"/>
-            <SeekBar
-                android:id="@+id/sizeSlider"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:max="150"
-                android:progress="50"/>
-        </LinearLayout>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="MENÜ"
+                        android:textSize="9sp"
+                        android:textStyle="bold"
+                        android:textColor="#FFFFFF"/>
+                </LinearLayout>
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="16dp">
-            <TextView
-                android:id="@+id/alphaLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Transparenz: 100%"/>
-            <SeekBar
-                android:id="@+id/alphaSlider"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:max="100"
-                android:progress="100"/>
-        </LinearLayout>
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="Voice Listener"
+                    android:textColor="#FFFFFF"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:layout_marginStart="8dp"/>
+            </LinearLayout>
+        </androidx.appcompat.widget.Toolbar>
 
-        <LinearLayout
+        <ScrollView
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="16dp">
-            <TextView
-                android:id="@+id/dimLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Hintergrund abdunkeln: 0%"/>
-            <SeekBar
-                android:id="@+id/dimSlider"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:max="80"
-                android:progress="0"/>
-        </LinearLayout>
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:scrollbars="vertical"
+            android:scrollbarStyle="outsideOverlay">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="16dp">
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="System Prompt (Llama):"/>
-            <EditText
-                android:id="@+id/promptInput"
-                android:layout_width="match_parent"
-                android:layout_height="150dp"
-                android:gravity="top|start"
-                android:scrollbars="vertical"
-                android:background="@android:drawable/edit_text"
-                android:padding="8dp"
-                android:textSize="12sp"
-                android:inputType="textMultiLine"
-                android:hint="Standard Prompt wird verwendet..."/>
-            <Button
-                android:id="@+id/resetPromptButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Reset Prompt"
-                android:textSize="12sp"
-                android:layout_gravity="end"/>
-            <CheckBox
-                android:id="@+id/llamaEnabledCheckBox"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Llama-Korrektur verwenden"
-                android:checked="true"
-                android:layout_marginTop="8dp"/>
-            
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Wörterbuch / Kontext:"
-                android:layout_marginTop="16dp"/>
-            <EditText
-                android:id="@+id/vocabularyInput"
-                android:layout_width="match_parent"
-                android:layout_height="120dp"
-                android:gravity="top|start"
-                android:scrollbars="vertical"
-                android:background="@android:drawable/edit_text"
-                android:padding="8dp"
-                android:textSize="12sp"
-                android:inputType="textMultiLine"
-                android:hint="Namen, Fachbegriffe, Kontext... (z.B. 'Dr. Müller', 'Projekt Alpha')."/>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="16dp">
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Aufnahme-Trigger (Einmalklick = Zwischenablage):"
-                android:textStyle="bold"/>
-            <RadioGroup
-                android:id="@+id/interactionModeGroup"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:layout_marginTop="4dp">
-                <RadioButton
-                    android:id="@+id/modeDoubleTap"
-                    android:layout_width="wrap_content"
+                android:gravity="center_horizontal"
+                android:padding="16dp"
+                android:paddingBottom="100dp">
+
+
+                <!-- ==================== SECTION: Allgemein ==================== -->
+                <LinearLayout
+                    android:id="@+id/sectionGeneral"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Doppeltipp = Aufnahme (Long-Press = Menü)"
-                    android:checked="true"/>
-                <RadioButton
-                    android:id="@+id/modeLongPress"
-                    android:layout_width="wrap_content"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="Groq API Key">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/apiKeyInput"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="textPassword"/>
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="Gemini API Key (für TTS)">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/geminiApiKeyInput"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="textPassword"/>
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="8dp">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="LLM Modell:"
+                            android:textSize="14sp"
+                            android:paddingEnd="8dp"/>
+                        <Spinner
+                            android:id="@+id/llmModelSpinner"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"/>
+                    </LinearLayout>
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:hint="EQS Server URL (z.B. https://eqs.example.com)">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/eqsServerUrlInput"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="textUri"/>
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginTop="16dp">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="System Prompt (Llama):"/>
+                        <EditText
+                            android:id="@+id/promptInput"
+                            android:layout_width="match_parent"
+                            android:layout_height="150dp"
+                            android:gravity="top|start"
+                            android:scrollbars="vertical"
+                            android:background="@android:drawable/edit_text"
+                            android:padding="8dp"
+                            android:textSize="12sp"
+                            android:inputType="textMultiLine"
+                            android:hint="Standard Prompt wird verwendet..."/>
+                        <Button
+                            android:id="@+id/resetPromptButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Reset Prompt"
+                            android:textSize="12sp"
+                            android:layout_gravity="end"/>
+                        <CheckBox
+                            android:id="@+id/llamaEnabledCheckBox"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Llama-Korrektur verwenden"
+                            android:checked="true"
+                            android:layout_marginTop="8dp"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Wörterbuch / Kontext:"
+                            android:layout_marginTop="16dp"/>
+                        <EditText
+                            android:id="@+id/vocabularyInput"
+                            android:layout_width="match_parent"
+                            android:layout_height="120dp"
+                            android:gravity="top|start"
+                            android:scrollbars="vertical"
+                            android:background="@android:drawable/edit_text"
+                            android:padding="8dp"
+                            android:textSize="12sp"
+                            android:inputType="textMultiLine"
+                            android:hint="Namen, Fachbegriffe, Kontext... (z.B. 'Dr. Müller', 'Projekt Alpha')."/>
+                    </LinearLayout>
+
+                    <!-- Buttons + Help -->
+                    <include layout="@layout/section_footer" android:id="@+id/footerGeneral"/>
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="API Keys und Server-URL konfigurieren.\n\n- Groq API Key: Für Spracherkennung (Whisper). Kostenlos auf groq.com.\n- Gemini API Key: Für TTS-Sprachausgabe (optional).\n- LLM Modell: Welches Modell für die Llama-Korrektur verwendet wird.\n- EQS Server URL: Dein EQS-Server für Marktdaten und Kontextsuche.\n- System Prompt: Anweisungen für die KI-Textkorrektur.\n- Wörterbuch: Namen und Fachbegriffe, die die Erkennung verbessern."
+                        android:textSize="11sp"
+                        android:textColor="#888888"
+                        android:background="#0A000000"
+                        android:padding="8dp"
+                        android:layout_marginTop="12dp"/>
+
+                </LinearLayout>
+
+                <!-- ==================== SECTION: Button ==================== -->
+                <LinearLayout
+                    android:id="@+id/sectionButton"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Long-Press = Aufnahme (Doppeltipp = Menü)"/>
-            </RadioGroup>
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Triple-Tap = Button verstecken (immer)"
-                android:textSize="12sp"
-                android:textColor="#666666"
-                android:layout_marginTop="4dp"/>
-            
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Sichtbarkeit:"
-                android:layout_marginTop="12dp"
-                android:textStyle="bold"/>
-            <CheckBox
-                android:id="@+id/focusModeCheckBox"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Auto-Hide (Nur bei Texteingabe zeigen)"
-                android:checked="false"/>
-            
+                    android:orientation="vertical"
+                    android:visibility="gone">
 
-            <CheckBox
-                android:id="@+id/alwaysHiddenCheckBox"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Immer versteckt (Nur Notification zeigen)"
-                android:checked="false"
-                android:layout_marginTop="4dp"/>
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginTop="8dp">
+                        <TextView
+                            android:id="@+id/sizeLabel"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Button Größe: 100%"/>
+                        <SeekBar
+                            android:id="@+id/sizeSlider"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:max="150"
+                            android:progress="50"/>
+                    </LinearLayout>
 
-        </LinearLayout>
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginTop="16dp">
+                        <TextView
+                            android:id="@+id/alphaLabel"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Transparenz: 100%"/>
+                        <SeekBar
+                            android:id="@+id/alphaSlider"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:max="100"
+                            android:progress="100"/>
+                    </LinearLayout>
 
-        <!-- Wisch-Gesten Einstellungen -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="16dp"
-            android:background="#1A000000"
-            android:padding="8dp">
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginTop="16dp">
+                        <TextView
+                            android:id="@+id/dimLabel"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Hintergrund abdunkeln: 0%"/>
+                        <SeekBar
+                            android:id="@+id/dimSlider"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:max="80"
+                            android:progress="0"/>
+                    </LinearLayout>
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Wisch-Gesten"
-                android:textStyle="bold"
-                android:layout_marginBottom="8dp"/>
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginTop="16dp">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Button Farbe:"/>
+                        <HorizontalScrollView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:scrollbars="none">
+                            <RadioGroup
+                                android:id="@+id/colorGroup"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal">
+                                <RadioButton android:id="@+id/colorPurple" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Lila" android:checked="true"/>
+                                <RadioButton android:id="@+id/colorBlue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Blau"/>
+                                <RadioButton android:id="@+id/colorRed" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Rot"/>
+                                <RadioButton android:id="@+id/colorGreen" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Grün"/>
+                                <RadioButton android:id="@+id/colorBlack" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Schwarz"/>
+                                <RadioButton android:id="@+id/colorWhite" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Weiß"/>
+                                <RadioButton android:id="@+id/colorSilver" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Silber"/>
+                                <RadioButton android:id="@+id/colorGold" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Gold"/>
+                                <RadioButton android:id="@+id/colorOrange" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Orange"/>
+                                <RadioButton android:id="@+id/colorPink" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Pink"/>
+                                <RadioButton android:id="@+id/colorCyan" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Cyan"/>
+                                <RadioButton android:id="@+id/colorYellow" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Gelb"/>
+                            </RadioGroup>
+                        </HorizontalScrollView>
+                    </LinearLayout>
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="4dp">
-                <TextView
-                    android:layout_width="80dp"
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginTop="16dp">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Aufnahme-Trigger (Einmalklick = Zwischenablage):"
+                            android:textStyle="bold"/>
+                        <RadioGroup
+                            android:id="@+id/interactionModeGroup"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:layout_marginTop="4dp">
+                            <RadioButton android:id="@+id/modeDoubleTap" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Doppeltipp = Aufnahme (Long-Press = Menü)" android:checked="true"/>
+                            <RadioButton android:id="@+id/modeLongPress" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Long-Press = Aufnahme (Doppeltipp = Menü)"/>
+                        </RadioGroup>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Triple-Tap = Button verstecken (immer)" android:textSize="12sp" android:textColor="#666666" android:layout_marginTop="4dp"/>
+
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Sichtbarkeit:" android:layout_marginTop="12dp" android:textStyle="bold"/>
+                        <CheckBox android:id="@+id/focusModeCheckBox" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Auto-Hide (Nur bei Texteingabe zeigen)" android:checked="false"/>
+                        <CheckBox android:id="@+id/alwaysHiddenCheckBox" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Immer versteckt (Nur Notification zeigen)" android:checked="false" android:layout_marginTop="4dp"/>
+                    </LinearLayout>
+
+                    <include layout="@layout/section_footer" android:id="@+id/footerButton"/>
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Overlay-Button Aussehen und Verhalten.\n\n- Größe: 50% bis 200% skalierbar.\n- Transparenz: Wie durchsichtig der Button ist (min. 20%).\n- Abdunkeln: Hintergrund hinter dem Menü abdunkeln.\n- Farbe: Farbe des Overlay-Buttons.\n- Trigger: Welche Geste die Aufnahme startet vs. das Menü öffnet.\n- Auto-Hide: Button nur anzeigen, wenn ein Textfeld aktiv ist.\n- Immer versteckt: Button komplett ausblenden, Steuerung nur über Notification."
+                        android:textSize="11sp"
+                        android:textColor="#888888"
+                        android:background="#0A000000"
+                        android:padding="8dp"
+                        android:layout_marginTop="12dp"/>
+
+                </LinearLayout>
+
+                <!-- ==================== SECTION: Gesten ==================== -->
+                <LinearLayout
+                    android:id="@+id/sectionGestures"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Hoch:"/>
-                <Spinner
-                    android:id="@+id/spinnerSwipeUp"
-                    android:layout_width="0dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:background="#1A000000"
+                        android:padding="8dp">
+
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Wisch-Gesten" android:textStyle="bold" android:layout_marginBottom="8dp"/>
+
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="4dp">
+                            <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="Hoch:"/>
+                            <Spinner android:id="@+id/spinnerSwipeUp" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
+                        </LinearLayout>
+
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="4dp">
+                            <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="Runter:"/>
+                            <Spinner android:id="@+id/spinnerSwipeDown" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
+                        </LinearLayout>
+
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="4dp">
+                            <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="Links:"/>
+                            <Spinner android:id="@+id/spinnerSwipeLeft" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
+                        </LinearLayout>
+
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="4dp">
+                            <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="Rechts:"/>
+                            <Spinner android:id="@+id/spinnerSwipeRight" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
+                        </LinearLayout>
+
+                        <Button android:id="@+id/btnGestureRecord" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Eigene Gesten trainieren..." android:textSize="12sp" android:layout_marginTop="8dp"/>
+                    </LinearLayout>
+
+                    <include layout="@layout/section_footer" android:id="@+id/footerGestures"/>
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Wisch-Aktionen auf dem Overlay-Button.\n\n- Jede Richtung (Hoch/Runter/Links/Rechts) kann eine eigene Aktion auslösen.\n- Eigene Gesten trainieren: Zeichne Muster und verknüpfe sie mit Aktionen.\n- Tasker-Tasks erscheinen hier automatisch, wenn angelegt."
+                        android:textSize="11sp"
+                        android:textColor="#888888"
+                        android:background="#0A000000"
+                        android:padding="8dp"
+                        android:layout_marginTop="12dp"/>
+
+                </LinearLayout>
+
+                <!-- ==================== SECTION: Radial-Menü ==================== -->
+                <LinearLayout
+                    android:id="@+id/sectionRadial"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"/>
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:background="#1A000000"
+                        android:padding="8dp">
+
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Radial-Menü (Reihenfolge &amp; Sichtbarkeit)" android:textStyle="bold" android:layout_marginBottom="8dp"/>
+
+                        <LinearLayout android:id="@+id/radialMenuContainer" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"/>
+
+                        <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#33000000" android:layout_marginTop="12dp" android:layout_marginBottom="8dp"/>
+
+                        <CheckBox android:id="@+id/clipboardHistoryEnabledCheckBox" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:text="Zwischenablage-Verlauf aktiv (speichert Kopiertes)" android:checked="true"/>
+                        <CheckBox android:id="@+id/appEqsContextCheckBox" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="EQS (Rechtsklick-Menü bei Text)" android:checked="true"/>
+                    </LinearLayout>
+
+                    <include layout="@layout/section_footer" android:id="@+id/footerRadial"/>
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Das Radial-Menü erscheint bei Doppeltipp oder Long-Press (je nach Trigger-Einstellung).\n\n- Reihenfolge per Pfeiltasten ändern.\n- Einträge ein-/ausblenden per Checkbox.\n- Zwischenablage-Verlauf: Speichert kopierte Texte für schnellen Zugriff.\n- EQS-Kontext: Zeigt 'Nachschlagen' im Textauswahlmenü anderer Apps."
+                        android:textSize="11sp"
+                        android:textColor="#888888"
+                        android:background="#0A000000"
+                        android:padding="8dp"
+                        android:layout_marginTop="12dp"/>
+
+                </LinearLayout>
+
+                <!-- ==================== SECTION: Marktdaten ==================== -->
+                <LinearLayout
+                    android:id="@+id/sectionMarket"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:background="#1A000000"
+                        android:padding="8dp">
+
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Marktdaten" android:textStyle="bold" android:layout_marginBottom="8dp"/>
+
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Datenquelle:" android:layout_marginBottom="4dp"/>
+                        <RadioGroup
+                            android:id="@+id/marketSourceGroup"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:layout_marginBottom="8dp">
+                            <RadioButton
+                                android:id="@+id/radioSourceEqs"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="EQS Server"
+                                android:textSize="12sp"/>
+                            <RadioButton
+                                android:id="@+id/radioSourceFirebase"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Firebase"
+                                android:textSize="12sp"
+                                android:layout_marginStart="16dp"/>
+                        </RadioGroup>
+
+                        <EditText
+                            android:id="@+id/firebaseUrlInput"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:textSize="11sp"
+                            android:hint="Firebase URL (z.B. https://xxx.firebasedatabase.app/pfad)"
+                            android:inputType="textUri"
+                            android:visibility="gone"/>
+
+                        <Button android:id="@+id/marketKeysSelectButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Marktdaten auswählen..." android:textSize="12sp"/>
+                        <TextView android:id="@+id/marketKeysDisplay" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#888888" android:text="Keine Werte ausgewählt" android:paddingStart="4dp" android:paddingEnd="4dp"/>
+                        <EditText android:id="@+id/marketKeysInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:hint="US500FU, USTECFU, DE40FU" android:visibility="gone"/>
+
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Aktualisierungsintervall (Sekunden):" android:layout_marginTop="8dp"/>
+                        <EditText android:id="@+id/marketIntervalInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:textSize="12sp" android:text="1"/>
+
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Werte im minimierten Widget:" android:layout_marginTop="8dp"/>
+                        <Spinner android:id="@+id/marketMinValuesSpinner" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+                        <CheckBox android:id="@+id/marketNotificationCheckBox" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Marktdaten in Benachrichtigungsleiste" android:checked="false" android:layout_marginTop="8dp"/>
+                    </LinearLayout>
+
+                    <include layout="@layout/section_footer" android:id="@+id/footerMarket"/>
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Live-Marktdaten als Overlay-Widget.\n\n- Datenquelle: EQS Server oder Firebase Realtime Database.\n- Werte auswählen: Welche Symbole angezeigt werden (z.B. US500FU, BTCUSD).\n- Intervall: Wie oft die Daten aktualisiert werden (1-60 Sek.).\n- Minimiert: Wie viele Werte im minimierten Zustand sichtbar sind.\n- Doppelklick auf Widget = Minimieren/Maximieren.\n- Long-Press = Kontextmenü (Fullscreen, Schriftgröße, Verstecken).\n- Dreifachklick = Widget schließen.\n- Firebase: Erwartet JSON mit {KEY: {price, change}} Struktur."
+                        android:textSize="11sp"
+                        android:textColor="#888888"
+                        android:background="#0A000000"
+                        android:padding="8dp"
+                        android:layout_marginTop="12dp"/>
+
+                </LinearLayout>
+
+                <!-- ==================== SECTION: Textbausteine ==================== -->
+                <LinearLayout
+                    android:id="@+id/sectionTextExpansion"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:background="#1A000000"
+                        android:padding="8dp">
+
+                        <CheckBox android:id="@+id/textExpansionCheckBox" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Textbausteine (Espanso-Stil)" android:textStyle="bold" android:checked="false"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Kürzel werden beim Tippen automatisch ersetzt." android:textSize="11sp" android:textColor="#666" android:layout_marginBottom="4dp"/>
+
+                        <LinearLayout android:id="@+id/expansionRulesContainer" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"/>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:layout_marginTop="4dp">
+                            <Button android:id="@+id/addExpansionRuleButton" android:layout_width="wrap_content" android:layout_height="36dp" android:text="+ Regel" android:textSize="12sp" android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="16dp" android:paddingEnd="16dp"/>
+                            <Button android:id="@+id/exportExpansionRulesButton" android:layout_width="wrap_content" android:layout_height="36dp" android:text="Exportieren" android:textSize="12sp" android:minWidth="0dp" android:minHeight="0dp" android:paddingStart="16dp" android:paddingEnd="16dp" android:layout_marginStart="8dp"/>
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <include layout="@layout/section_footer" android:id="@+id/footerTextExpansion"/>
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Automatische Textersetzung (wie Espanso).\n\n- Aktivieren per Checkbox oben.\n- Regeln anlegen: Kürzel → Ersetzungstext.\n- Beim Tippen in beliebigen Apps wird das Kürzel erkannt und ersetzt.\n- Benötigt den Accessibility-Service.\n- Exportieren: Regeln als Text in die Zwischenablage kopieren."
+                        android:textSize="11sp"
+                        android:textColor="#888888"
+                        android:background="#0A000000"
+                        android:padding="8dp"
+                        android:layout_marginTop="12dp"/>
+
+                </LinearLayout>
+
+                <!-- ==================== SECTION: Tasker ==================== -->
+                <LinearLayout
+                    android:id="@+id/sectionTasker"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:background="#1A000000"
+                        android:padding="8dp">
+
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tasker-Integration" android:textStyle="bold" android:layout_marginBottom="4dp"/>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tasker-Tasks anlegen, die als Gesten, Wisch-Aktionen oder Radial-Menü-Einträge verfügbar sind." android:textSize="11sp" android:textColor="#666" android:layout_marginBottom="8dp"/>
+
+                        <LinearLayout android:id="@+id/taskerTasksContainer" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"/>
+
+                        <Button android:id="@+id/btnAddTaskerTask" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="+ Tasker-Task hinzufügen" android:textSize="12sp" android:layout_marginTop="8dp"/>
+                    </LinearLayout>
+
+                    <include layout="@layout/section_footer" android:id="@+id/footerTasker"/>
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Tasker-Tasks aus VoiceListener heraus starten.\n\n- Task-Name: Muss exakt mit dem Namen in Tasker übereinstimmen.\n- par1/par2: Optionale Variablen, die an den Task übergeben werden.\n- Angelegte Tasks erscheinen automatisch in den Gesten- und Wisch-Aktions-Auswahlen.\n- Test-Button: Führt den Task sofort aus, zum Testen.\n- Voraussetzung: Tasker muss installiert und der externe Zugriff erlaubt sein (Tasker → Einstellungen → Verschiedenes → Externen Zugriff erlauben)."
+                        android:textSize="11sp"
+                        android:textColor="#888888"
+                        android:background="#0A000000"
+                        android:padding="8dp"
+                        android:layout_marginTop="12dp"/>
+
+                </LinearLayout>
+
+                <!-- ==================== SECTION: System ==================== -->
+                <LinearLayout
+                    android:id="@+id/sectionSystem"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <Button android:id="@+id/ttsSystemSettingsButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Sprachausgabe (TTS) Einstellungen"/>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="16dp">
+                        <CheckBox android:id="@+id/logsEnabledCheckBox" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Logs aktiv" android:checked="true"/>
+                        <Space android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
+                        <Button android:id="@+id/clearLogsButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Logs löschen" android:backgroundTint="#B00020"/>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center"
+                        android:layout_marginTop="16dp">
+                        <Button android:id="@+id/saveButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Save &amp; Start"/>
+                        <Space android:layout_width="16dp" android:layout_height="wrap_content"/>
+                        <Button android:id="@+id/stopButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="App Beenden" android:backgroundTint="#B00020"/>
+                    </LinearLayout>
+
+                    <TextView android:id="@+id/permissionWarningText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Bitte Overlay &amp; Accessibility Berechtigungen erteilen." android:gravity="center" android:layout_marginTop="24dp"/>
+                    <Button android:id="@+id/openAccessibilitySettings" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Einstellungen öffnen" android:backgroundTint="#FF6200EE" android:textColor="#FFFFFF" android:layout_marginTop="8dp"/>
+                    <Button android:id="@+id/btnRestoreBackup" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Einstellungen wiederherstellen" android:backgroundTint="#FF795548" android:textColor="#FFFFFF" android:layout_marginTop="16dp"/>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="8dp">
+                        <Button android:id="@+id/btnExportSettings" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Export" android:backgroundTint="#FF5C6BC0" android:textColor="#FFFFFF"/>
+                        <Space android:layout_width="8dp" android:layout_height="wrap_content"/>
+                        <Button android:id="@+id/btnImportSettings" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Import" android:backgroundTint="#FF5C6BC0" android:textColor="#FFFFFF"/>
+                    </LinearLayout>
+
+                    <Button android:id="@+id/refreshLogs" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Logs laden / Kopieren" android:layout_marginTop="16dp"/>
+                    <TextView android:id="@+id/logTextView" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="#EEE" android:padding="8dp" android:fontFamily="monospace" android:textSize="10sp" android:textIsSelectable="true" android:text="Logs erscheinen hier..."/>
+
+                    <include layout="@layout/section_footer" android:id="@+id/footerSystem"/>
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="System-Einstellungen und Wartung.\n\n- TTS: System-Sprachausgabe konfigurieren (Stimme, Geschwindigkeit).\n- Logs: Debug-Protokolle ein-/ausschalten, anzeigen und kopieren.\n- Save &amp; Start: Alle Einstellungen speichern und den Overlay-Service starten.\n- App Beenden: Service stoppen.\n- Backup: Einstellungen sichern, wiederherstellen, exportieren oder importieren.\n- Berechtigungen: Overlay und Accessibility müssen aktiviert sein."
+                        android:textSize="11sp"
+                        android:textColor="#888888"
+                        android:background="#0A000000"
+                        android:padding="8dp"
+                        android:layout_marginTop="12dp"/>
+
+                </LinearLayout>
+
             </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="4dp">
-                <TextView
-                    android:layout_width="80dp"
-                    android:layout_height="wrap_content"
-                    android:text="Runter:"/>
-                <Spinner
-                    android:id="@+id/spinnerSwipeDown"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"/>
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="4dp">
-                <TextView
-                    android:layout_width="80dp"
-                    android:layout_height="wrap_content"
-                    android:text="Links:"/>
-                <Spinner
-                    android:id="@+id/spinnerSwipeLeft"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"/>
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="4dp">
-                <TextView
-                    android:layout_width="80dp"
-                    android:layout_height="wrap_content"
-                    android:text="Rechts:"/>
-                <Spinner
-                    android:id="@+id/spinnerSwipeRight"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"/>
-            </LinearLayout>
-
-            <Button
-                android:id="@+id/btnGestureRecord"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Eigene Gesten trainieren..."
-                android:textSize="12sp"
-                android:layout_marginTop="8dp"/>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="16dp">
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Button Farbe:"/>
-            <HorizontalScrollView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:scrollbars="none">
-                <RadioGroup
-                    android:id="@+id/colorGroup"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-                    <RadioButton
-                        android:id="@+id/colorPurple"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Lila"
-                        android:checked="true"/>
-                    <RadioButton
-                        android:id="@+id/colorBlue"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Blau"/>
-                    <RadioButton
-                        android:id="@+id/colorRed"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Rot"/>
-                    <RadioButton
-                        android:id="@+id/colorGreen"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Grün"/>
-                    <RadioButton
-                        android:id="@+id/colorBlack"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Schwarz"/>
-                    <RadioButton
-                        android:id="@+id/colorWhite"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Weiß"/>
-                    <RadioButton
-                        android:id="@+id/colorSilver"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Silber"/>
-                    <RadioButton
-                        android:id="@+id/colorGold"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Gold"/>
-                    <RadioButton
-                        android:id="@+id/colorOrange"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Orange"/>
-                    <RadioButton
-                        android:id="@+id/colorPink"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Pink"/>
-                    <RadioButton
-                        android:id="@+id/colorCyan"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Cyan"/>
-                    <RadioButton
-                        android:id="@+id/colorYellow"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Gelb"/>
-                </RadioGroup>
-            </HorizontalScrollView>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="16dp"
-            android:background="#1A000000"
-            android:padding="8dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Radial-Menü (Reihenfolge &amp; Sichtbarkeit)"
-                android:textStyle="bold"
-                android:layout_marginBottom="8dp"/>
-
-            <LinearLayout
-                android:id="@+id/radialMenuContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"/>
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="#33000000"
-                android:layout_marginTop="12dp"
-                android:layout_marginBottom="8dp"/>
-
-            <CheckBox
-                android:id="@+id/clipboardHistoryEnabledCheckBox"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="12sp"
-                android:text="Zwischenablage-Verlauf aktiv (speichert Kopiertes)"
-                android:checked="true"/>
-
-            <CheckBox
-                android:id="@+id/appEqsContextCheckBox"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="EQS (Rechtsklick-Menü bei Text)"
-                android:checked="true"/>
-
-            <Button
-                android:id="@+id/marketKeysSelectButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Marktdaten auswählen..."
-                android:textSize="12sp"
-                android:layout_marginTop="8dp"/>
-            <TextView
-                android:id="@+id/marketKeysDisplay"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:textColor="#888888"
-                android:text="Keine Werte ausgewählt"
-                android:paddingStart="4dp"
-                android:paddingEnd="4dp"/>
-            <EditText
-                android:id="@+id/marketKeysInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="12sp"
-                android:hint="US500FU, USTECFU, DE40FU"
-                android:visibility="gone"/>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Aktualisierungsintervall (Sekunden):"
-                android:layout_marginTop="8dp"/>
-            <EditText
-                android:id="@+id/marketIntervalInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="number"
-                android:textSize="12sp"
-                android:text="1"/>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Werte im minimierten Widget:"
-                android:layout_marginTop="8dp"/>
-            <Spinner
-                android:id="@+id/marketMinValuesSpinner"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"/>
-
-            <CheckBox
-                android:id="@+id/marketNotificationCheckBox"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Marktdaten in Benachrichtigungsleiste"
-                android:checked="false"
-                android:layout_marginTop="8dp"/>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="16dp"
-            android:background="#1A000000"
-            android:padding="8dp">
-
-            <CheckBox
-                android:id="@+id/textExpansionCheckBox"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Textbausteine (Espanso-Stil)"
-                android:textStyle="bold"
-                android:checked="false"/>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Kürzel werden beim Tippen automatisch ersetzt."
-                android:textSize="11sp"
-                android:textColor="#666"
-                android:layout_marginBottom="4dp"/>
-
-            <LinearLayout
-                android:id="@+id/expansionRulesContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"/>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="4dp">
-
-                <Button
-                    android:id="@+id/addExpansionRuleButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:text="+ Regel"
-                    android:textSize="12sp"
-                    android:minWidth="0dp"
-                    android:minHeight="0dp"
-                    android:paddingStart="16dp"
-                    android:paddingEnd="16dp"/>
-
-                <Button
-                    android:id="@+id/exportExpansionRulesButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:text="Exportieren"
-                    android:textSize="12sp"
-                    android:minWidth="0dp"
-                    android:minHeight="0dp"
-                    android:paddingStart="16dp"
-                    android:paddingEnd="16dp"
-                    android:layout_marginStart="8dp"/>
-            </LinearLayout>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginTop="16dp">
-            <CheckBox
-                android:id="@+id/logsEnabledCheckBox"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Logs aktiv"
-                android:checked="true"/>
-            <Space
-                 android:layout_width="0dp"
-                 android:layout_height="wrap_content"
-                 android:layout_weight="1"/>
-            <Button
-                android:id="@+id/clearLogsButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Logs löschen"
-                android:backgroundTint="#B00020"/>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:layout_marginTop="16dp">
-            <Button
-                android:id="@+id/saveButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Save &amp; Start"/>
-            <Space
-                android:layout_width="16dp"
-                android:layout_height="wrap_content"/>
-            <Button
-                android:id="@+id/stopButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="App Beenden"
-                android:backgroundTint="#B00020"/>
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/permissionWarningText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Bitte Overlay &amp; Accessibility Berechtigungen erteilen."
-            android:gravity="center"
-            android:layout_marginTop="24dp"/>
-
-        <Button
-            android:id="@+id/openAccessibilitySettings"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Einstellungen öffnen"
-            android:backgroundTint="#FF6200EE"
-            android:textColor="#FFFFFF"
-            android:layout_marginTop="8dp"/>
-
-        <Button
-            android:id="@+id/btnRestoreBackup"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Einstellungen wiederherstellen"
-            android:backgroundTint="#FF795548"
-            android:textColor="#FFFFFF"
-            android:layout_marginTop="16dp"/>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="8dp">
-
-            <Button
-                android:id="@+id/btnExportSettings"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:text="Export"
-                android:backgroundTint="#FF5C6BC0"
-                android:textColor="#FFFFFF"/>
-
-            <Space
-                android:layout_width="8dp"
-                android:layout_height="wrap_content"/>
-
-            <Button
-                android:id="@+id/btnImportSettings"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:text="Import"
-                android:backgroundTint="#FF5C6BC0"
-                android:textColor="#FFFFFF"/>
-        </LinearLayout>
-
-        <Button
-            android:id="@+id/refreshLogs"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Logs laden / Kopieren"
-            android:layout_marginTop="16dp"/>
-
-        <TextView
-            android:id="@+id/logTextView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:background="#EEE"
-            android:padding="8dp"
-            android:fontFamily="monospace"
-            android:textSize="10sp"
-            android:textIsSelectable="true" 
-            android:text="Logs erscheinen hier..."/>
-
+        </ScrollView>
     </LinearLayout>
-</ScrollView>
+
+    <!-- Navigation Drawer -->
+    <com.google.android.material.navigation.NavigationView
+        android:id="@+id/navigationView"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        app:menu="@menu/drawer_menu"/>
+
+</androidx.drawerlayout.widget.DrawerLayout>

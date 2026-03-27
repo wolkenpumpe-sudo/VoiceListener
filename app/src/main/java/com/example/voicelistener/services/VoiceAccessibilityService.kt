@@ -21,6 +21,9 @@ class VoiceAccessibilityService : AccessibilityService() {
         const val FUNC_CLEAR = "{{CLEAR}}"
         const val FUNC_UPPERCASE = "{{UPPERCASE}}"
         const val FUNC_LOWERCASE = "{{LOWERCASE}}"
+        const val FUNC_COPY_ALL = "{{COPY_ALL}}"
+        const val FUNC_CUT_ALL = "{{CUT_ALL}}"
+        const val FUNC_TASKER_PREFIX = "{{TASKER:"
 
         val FUNCTION_REPLACEMENTS = mapOf(
             FUNC_DATE to "Datum einfügen",
@@ -28,8 +31,20 @@ class VoiceAccessibilityService : AccessibilityService() {
             FUNC_DATETIME to "Datum + Uhrzeit",
             FUNC_CLEAR to "Feld leeren",
             FUNC_UPPERCASE to "GROSSBUCHSTABEN",
-            FUNC_LOWERCASE to "kleinbuchstaben"
+            FUNC_LOWERCASE to "kleinbuchstaben",
+            FUNC_COPY_ALL to "Alles kopieren",
+            FUNC_CUT_ALL to "Alles ausschneiden"
         )
+
+        /** Returns function replacements + dynamic Tasker task entries */
+        fun getAllFunctionReplacements(context: android.content.Context): Map<String, String> {
+            val all = LinkedHashMap(FUNCTION_REPLACEMENTS)
+            val tasks = com.example.voicelistener.TaskerHelper.getTasks(context)
+            for (task in tasks) {
+                all["${FUNC_TASKER_PREFIX}${task.id}}}"] = "Tasker: ${task.name}"
+            }
+            return all
+        }
     }
     
     private var lastFocusState: Boolean? = null
@@ -433,7 +448,28 @@ class VoiceAccessibilityService : AccessibilityService() {
             FUNC_LOWERCASE -> {
                 newText = textBeforeTrigger.lowercase()
             }
-            else -> {
+            FUNC_COPY_ALL -> {
+                // Remove trigger, copy all text to clipboard
+                newText = textBeforeTrigger
+                val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("copied", textBeforeTrigger))
+            }
+            FUNC_CUT_ALL -> {
+                // Copy all text to clipboard, then clear field
+                val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("cut", textBeforeTrigger))
+                newText = ""
+            }
+            else -> if (replacement.startsWith(FUNC_TASKER_PREFIX) && replacement.endsWith("}}")) {
+                // Execute Tasker task, remove trigger from text
+                val taskId = replacement.removePrefix(FUNC_TASKER_PREFIX).removeSuffix("}}")
+                val task = com.example.voicelistener.TaskerHelper.getTasks(this).find { it.id == taskId }
+                if (task != null) {
+                    com.example.voicelistener.TaskerHelper.executeTask(this, task)
+                    com.example.voicelistener.utils.FileLogger.log(this, TAG, "Tasker task '${task.name}' triggered via expansion")
+                }
+                newText = textBeforeTrigger
+            } else {
                 newText = textBeforeTrigger + resolvedReplacement
             }
         }
@@ -469,8 +505,8 @@ class VoiceAccessibilityService : AccessibilityService() {
             FUNC_DATE -> dateFmt.format(now.time)
             FUNC_TIME -> timeFmt.format(now.time)
             FUNC_DATETIME -> "${dateFmt.format(now.time)} ${timeFmt.format(now.time)}"
-            FUNC_CLEAR, FUNC_UPPERCASE, FUNC_LOWERCASE -> "" // handled in applyExpansion
-            else -> replacement
+            FUNC_CLEAR, FUNC_UPPERCASE, FUNC_LOWERCASE, FUNC_COPY_ALL, FUNC_CUT_ALL -> "" // handled in applyExpansion
+            else -> if (replacement.startsWith(FUNC_TASKER_PREFIX)) "" else replacement
         }
     }
 
